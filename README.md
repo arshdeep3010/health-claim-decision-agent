@@ -8,7 +8,8 @@
 An AI-assisted health-insurance **claim decision-support** backend. It ingests a
 synthetic claim, retrieves relevant policy clauses via **RAG** (PostgreSQL +
 pgvector), extracts structured claim facts, applies **deterministic business
-rules**, consults an **AI decision layer** (Mercury), and produces an auditable:
+rules**, consults a **decision model** (Parallel Decisions, via OpenRouter) that returns a
+probability for each outcome, and produces an auditable:
 
 ```
 APPROVE   |   REJECT   |   HUMAN_REVIEW
@@ -20,6 +21,9 @@ semantic judgment. Every policy-based outcome is traceable to retrieved evidence
 This is **not** a chatbot and **not** a "chat with PDF" app — it is a real,
 deployable backend.
 
+**Live demo:** https://d97tm0469lmul.cloudfront.net (AWS Lambda + CloudFront; one-click
+demo sign-in; the first request after it has been idle takes ~30 s while the JVM starts).
+
 ---
 
 ## Technology stack
@@ -30,8 +34,8 @@ deployable backend.
 | Framework | Spring Boot 3.5.x (Web, Validation, Actuator; JPA/Security added by phase) |
 | Database | PostgreSQL + pgvector |
 | Migrations | Flyway |
-| AI (chat/extraction/explanation) | Mercury via OpenRouter (OpenAI-compatible, provider-abstracted) |
-| AI (decision assist) | Mercury (provider-abstracted `DecisionProvider`) |
+| AI judge (decision assist) | **Parallel Decisions Fast** decision model via OpenRouter's Decisions API: typed `choice` answer with per-outcome probabilities (`DecisionProvider`, swappable) |
+| AI (extraction/explanation) | `nvidia/nemotron-3.5-super-vl` via OpenRouter (OpenAI-compatible chat, strict JSON schema) |
 | Embeddings | Pluggable `EmbeddingProvider`: NVIDIA NIM `nemotron-3.5-embed-1b` (OpenAI-compatible, asymmetric query/passage, shortened to 384-d), or a local deterministic fallback for dev/CI |
 | Docs | OpenAPI / Swagger UI (springdoc) |
 | Build | Maven (via committed `./mvnw` wrapper) |
@@ -41,9 +45,11 @@ deployable backend.
 
 Research of the live Inception/OpenRouter docs established two facts that shape the design:
 
-1. The exact direct model id is `mercury-2.5`; the OpenRouter slug differs and is
-   **configured via `MERCURY_MODEL`**, never hardcoded.
-2. **Neither Mercury nor OpenRouter exposes a first-party embeddings endpoint**, so
+1. Model ids are **configuration, never hardcoded** (`DECISION_MODEL`, `MERCURY_MODEL`).
+   That paid off: the project started on Inception's Mercury 2.5, OpenRouter retired it
+   in November 2026, and switching the judge to a decision model and the chat client to
+   Nemotron needed no change to business logic.
+2. **OpenRouter exposes no first-party embeddings endpoint**, so
    embeddings come from a separate, swappable `EmbeddingProvider` — NVIDIA NIM
    (`nvidia/nemotron-3.5-embed-1b`) in the configured setup.
 
@@ -56,19 +62,19 @@ All external AI access sits behind interfaces (`ChatLlmProvider`, `DecisionProvi
 
 This project is built incrementally. Each phase compiles and tests before the next.
 
-- [x] **Phase 0** — Research real Mercury/OpenRouter APIs; propose architecture
+- [x] **Phase 0** — Research real LLM/OpenRouter APIs (Mercury at the time); propose architecture
 - [x] **Phase 1** — Spring Boot scaffold (web, validation, actuator, OpenAPI, error handling, correlation ids)
 - [x] **Phase 2** — PostgreSQL + Flyway + pgvector + domain entities (Testcontainers-verified)
 - [x] **Phase 3** — Claim APIs (create / get / list, validation, error envelope)
 - [x] **Phase 4** — Policy APIs + document ingestion (upload, PDF extraction, chunking, storage abstraction)
 - [x] **Phase 5** — pgvector RAG (EmbeddingProvider abstraction, embed-on-ingest, semantic retrieval)
-- [x] **Phase 6** — AI provider abstraction (Mercury chat via OpenRouter, Resilience4j, health)
+- [x] **Phase 6** — AI provider abstraction (OpenAI-compatible chat via OpenRouter, Resilience4j, health)
 - [x] **Phase 7** — Claim extraction (schema-constrained LLM → validated ClaimFacts)
 - [x] **Phase 8** — Decision orchestration (deterministic rules + AI assist, APPROVE/REJECT/HUMAN_REVIEW)
 - [x] **Phase 9** — Human review + explanation generation
 - [x] **Phase 10** — Audit trail + observability (Micrometer/Prometheus, structured logging)
 - [x] **Phase 11** — Security (JWT auth, roles USER/REVIEWER/ADMIN, CORS)
-- [x] **Phase 12** — Testing hardening (unit + Testcontainers + contract + security; **100 backend + 22 frontend tests** today)
+- [x] **Phase 12** — Testing hardening (unit + Testcontainers + contract + security; **111 backend + 23 frontend tests** today)
 - [x] **Phase 13** — Docker (multi-stage image, non-root, compose stack verified end-to-end)
 - [x] **Phase 14** — Cloud deployment (AWS ECR + Lambda) + S3 document storage
 - [x] **Phase 15** — CI/CD (GitHub Actions: PR/main build+test, image publish to GHCR)
@@ -76,6 +82,8 @@ This project is built incrementally. Each phase compiles and tests before the ne
 - [x] **Phase 17** — Live analysis stream (SSE `/analyze/stream`) + React demo UI
 - [x] **Phase 18** — NVIDIA NIM semantic embeddings (query/passage, 384-d) + re-embedding
 - [x] **Phase 19** — Transparency: policy rulebook (`GET /policies/{id}/chunks`) and the exact AI input streamed with each analysis
+- [x] **Phase 20** — Decision model as the AI judge (Parallel Decisions: per-outcome probabilities in ~1–2 s, web sources shown)
+- [x] **Phase 21** — Live on AWS: Lambda (container + Web Adapter, streaming Function URL), CloudFront + S3, Neon Postgres, GitHub Actions deploy via OIDC
 
 ---
 
@@ -181,25 +189,40 @@ accounts exist only under the `dev` profile).
 
 ---
 
-## Deployment (AWS ECR + Lambda)
+## Deployment (live on AWS)
 
-The service is a stateless container. For a live deployment, build the Lambda image
-(app + [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter),
-so the same app runs unchanged) and run it on **Lambda behind API Gateway**, with
-**RDS Postgres + pgvector** and **S3** for documents:
+**https://d97tm0469lmul.cloudfront.net** — sign in with a demo role and analyze a claim.
 
-```bash
-docker build -f Dockerfile.lambda -t <account>.dkr.ecr.<region>.amazonaws.com/health-claim-decision-agent:latest .
+```
+Browser ──HTTPS──▶ CloudFront ──▶ S3                 (React UI)
+                       │
+                       └─ /api/*, /actuator/* ─▶ Lambda Function URL (RESPONSE_STREAM)
+                                                    └─ Spring Boot in a container image
+                                                       + AWS Lambda Web Adapter
+                                                         ├─▶ Neon Postgres + pgvector
+                                                         ├─▶ S3 (policy documents)
+                                                         └─▶ OpenRouter (decision model, chat)
+                                                             NVIDIA NIM (embeddings)
 ```
 
-Full step-by-step runbook (ECR push, RDS + pgvector, S3, Secrets Manager, Lambda
-config, API Gateway, verification) and the honest Lambda tradeoffs (cold starts →
-SnapStart, 29s timeout → async job model, RDS Proxy pooling, S3 for the ephemeral
-filesystem): **[docs/deploy-aws.md](docs/deploy-aws.md)**.
+- **Infrastructure as code:** [`infra/aws/template.yaml`](infra/aws/template.yaml)
+  (CloudFormation) creates the Lambda, its streaming Function URL, both S3 buckets,
+  CloudFront (one origin for UI and API, so no CORS), and the GitHub deploy role.
+- **CI/CD:** [`deploy.yml`](.github/workflows/deploy.yml) runs after CI passes on `main`:
+  builds `Dockerfile.lambda`, pushes to ECR, updates the Lambda, smoke-tests readiness,
+  publishes the UI to S3 and invalidates CloudFront. It authenticates with **GitHub OIDC**
+  to a role that can only touch this app's resources — no AWS keys in GitHub. App
+  secrets live only in the Lambda's configuration.
+- **Live streaming on Lambda:** the Function URL runs in `RESPONSE_STREAM` mode and the
+  Web Adapter streams, so the SSE stage events arrive live (API Gateway would buffer them).
+- **Public-demo profile** (`prod,demo`): seeds the synthetic data and demo accounts,
+  limits AI endpoints to 5 per minute per account, and makes shared data read-only for
+  everyone except a private operator account (`DemoWriteGuard`).
+- **Start-up:** the Web Adapter waits for Spring's **readiness** (not liveness), so the
+  app is never frozen mid-start-up; a cold start takes ~30 s on 3 GB.
 
-The **same `Dockerfile` image** also runs on ECS Fargate / Render / Cloud Run with
-no code changes if you prefer to avoid Lambda's constraints. Document storage is
-S3-compatible (`STORAGE_PROVIDER=s3`; works with AWS S3, MinIO, Cloudflare R2).
+The same image runs on ECS Fargate / App Runner / Cloud Run unchanged. Runbook and
+trade-offs for an RDS-based setup: [docs/deploy-aws.md](docs/deploy-aws.md).
 
 ## Disclaimers
 

@@ -15,7 +15,7 @@ Internet → API Gateway (HTTP API) → Lambda (container: app + Lambda Web Adap
                                         │
                         ┌───────────────┼───────────────┐
                         ▼               ▼               ▼
-                  RDS Postgres     S3 bucket      OpenRouter / Mercury
+                  RDS Postgres     S3 bucket      OpenRouter (AI models)
                   + pgvector      (documents)        (optional)
                    via RDS Proxy
 ```

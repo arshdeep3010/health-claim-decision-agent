@@ -16,7 +16,7 @@ A synthetic health-insurance **claim** is submitted. The system extracts structu
 **facts** from it with an LLM (schema-constrained, validated), retrieves the most
 relevant **policy clauses** from ingested policy documents via **RAG** (PostgreSQL +
 pgvector, NVIDIA NIM embeddings), runs **deterministic business rules**, and — only
-when the rules raise no hard objection — asks an **AI decision layer** (Mercury) for
+when the rules raise no hard objection — asks a **decision model** (Parallel Decisions Fast, via OpenRouter) for
 a semantic judgment. A Java **orchestrator** fuses rules + AI into a final, auditable
 decision: **APPROVE / REJECT / HUMAN_REVIEW**. Each analysis can be **streamed live**
 stage by stage (Server-Sent Events) to the bundled React demo UI. Humans can
@@ -61,7 +61,8 @@ a human-readable **explanation** of a finished decision, but can never change it
 | Database | PostgreSQL 16 + **pgvector** | relational + vector search in one store |
 | Migrations | Flyway (`V1`–`V4`) | versioned schema, `ddl-auto=validate` (never auto-DDL) |
 | RAG | pgvector cosine `<=>`, HNSW index | semantic retrieval with traceability |
-| Chat / decision AI | **Mercury 2.5** (`inception/mercury-2.5`) via OpenRouter | fast diffusion LLM, strict JSON schema output |
+| AI judge | **Parallel Decisions Fast** decision model via OpenRouter's Decisions API | typed choice with a probability per outcome, ~1–2 s |
+| Chat AI (extraction, explanation) | `nvidia/nemotron-3.5-super-vl:free` via OpenRouter | OpenAI-compatible chat, strict JSON schema output |
 | Embeddings | **NVIDIA NIM** `nvidia/nemotron-3.5-embed-1b` (OpenAI-compatible), **or** local deterministic | semantic retrieval; offline dev/CI |
 | Streaming | Spring MVC `SseEmitter` + dedicated executor | live per-stage progress |
 | Resilience | Resilience4j (chat); bounded retry (embeddings) | timeout + retry + circuit breaker |
@@ -107,10 +108,11 @@ REST API.
         ▼              ▼                 ▼
    ┌─────────────────────────────────────────────────────────┐
    │  rag/ (embedding · retrieval · evidence)                 │
-   │  ai/  (llm · mercury · resilience)                       │
+   │  ai/  (llm · OpenAI-compatible chat · resilience)        │
    └──────┬──────────────────────┬──────────────────┬────────┘
           ▼                      ▼                  ▼
-   PostgreSQL + pgvector   Mercury / OpenRouter   NVIDIA NIM
+   PostgreSQL + pgvector   OpenRouter (decision   NVIDIA NIM
+                           model + chat)
    (JPA + native vector    (chat completions,     (/v1/embeddings,
     SQL)                    JSON schema)            query / passage)
           ▲
@@ -129,7 +131,8 @@ REST API.
 - `document` — storage abstraction, PDF extraction, cleaning, context-preserving
   chunking, ingestion orchestration.
 - `rag` — `EmbeddingProvider` (query vs passage), vector retrieval, evidence model.
-- `ai` — `ChatLlmProvider`, Mercury implementation, Resilience4j wiring, call metadata.
+- `ai` — `ChatLlmProvider`, the OpenAI-compatible chat client (`MercuryChatProvider`, named
+  after the model it was first built for), Resilience4j wiring, call metadata.
 - `decision` — rules engine, typed `ClaimDecisionContext`, `DecisionProvider`,
   the orchestrator, explanation generation, and `stream/` (stage events) +
   `config/AnalysisStreamConfig` (the streaming executor).
@@ -209,7 +212,7 @@ POST /claims/{id}/analyze/stream   (same pipeline, progress streamed as SSE, §5
    │ REJECT  → final REJECT        (no AI)    │   cost control: skip AI
    │ REVIEW  → final HUMAN_REVIEW  (no AI)    │
    │ ALLOW   → ragFailed? HUMAN_REVIEW        │
-   │           else DecisionProvider.decide() │   AI   ← Mercury (strict schema)
+   │           else DecisionProvider.decide() │   AI   ← decision model (probabilities)
    └──────────────────┬──────────────────────┘
                       │  GUARDRAILS (safety fusion):
                       │    APPROVE & conf≥min → APPROVE
@@ -228,7 +231,7 @@ POST /claims/{id}/review   (REVIEWER/ADMIN)        POST /claims/{id}/explain
    reviewer = authenticated principal                load finalized decision (short tx)
    APPROVE/REJECT → finalize claim status            generate text from decision +
    REQUEST_INFORMATION → stays in review             reasons + evidence + facts ONLY
-   record agreedWithAi, audit HUMAN_OVERRIDE         (Mercury if configured, else
+   record agreedWithAi, audit HUMAN_OVERRIDE         (chat LLM if configured, else
                                                       template; NEVER changes the
                                                       decision)
                                                      persist decision.explanation
@@ -264,8 +267,9 @@ event: decision  <DecisionResponse>        — or —      event: error {status,
   orchestrator. The UI only adds a minimum on-screen time per stage (~0.5 s) so
   sub-millisecond stages can be followed; it never changes a result.
 - **What the AI sees.** `AI STARTED` carries the model's instructions and `input`, built by
-  `DecisionPromptPayload` — the same object `MercuryDecisionProvider` serializes into
-  the prompt, so what the UI shows cannot drift from what the model receives: the
+  `DecisionPromptPayload` — the same object the decision model receives as its `state`
+  (or the LLM judge receives in its prompt), so what the UI shows cannot drift from what
+  the model receives: the
   claim (diagnosis, procedure, treatment, amount), the policy's coverage limit and
   exclusions, the extracted facts, the retrieved policy clauses, and the rule results.
 - **Client.** `EventSource` cannot send an `Authorization` header, so the UI reads the
@@ -298,8 +302,10 @@ missing information. Nothing else (no secrets, no raw DB rows) crosses the bound
 
 **Where the time goes** (one AI-approved demo claim, local stack): load ~20 ms,
 retrieve ~275 ms (one NVIDIA query embedding + a few-ms vector search), rules <1 ms,
-Mercury ~3–5 s, persist ~85 ms. The single model call dominates; Mercury is a
-diffusion LLM, which is why even with its reasoning step it answers in seconds.
+decision model ~0.8–2 s, persist ~85 ms. On AWS the decision model answered a live
+claim in 790 ms. A decision model returns typed probabilities instead of generating
+text, which is why it is several times faster than the LLM judge it replaced
+(Mercury 2.5, ~3–5 s, retired by OpenRouter in November 2026).
 
 ---
 
@@ -308,14 +314,26 @@ diffusion LLM, which is why even with its reasoning step it answers in seconds.
 | Interface | Prod implementation | Offline/default | Selected by |
 |-----------|---------------------|-----------------|-------------|
 | `ChatLlmProvider` | `MercuryChatProvider` (OpenAI-compatible chat, strict JSON schema) | `NoopChatLlmProvider` (fails → HUMAN_REVIEW) | `app.mercury.provider` |
-| `DecisionProvider` | `MercuryDecisionProvider` | `RuleOnlyDecisionProvider` (ALLOW→APPROVE) | same |
+| `DecisionProvider` | `ParallelDecisionProvider` (decision model) or `MercuryDecisionProvider` (chat LLM + JSON schema) | `RuleOnlyDecisionProvider` (ALLOW→APPROVE) | `app.decision-model.engine`, then `app.mercury.provider` |
 | `EmbeddingProvider` | `OpenAiCompatibleEmbeddingProvider` (NVIDIA NIM / OpenAI) | `DeterministicEmbeddingProvider` (384-dim, hashed, lexical) | `app.embedding.provider` |
 | `DocumentStorageService` | `S3DocumentStorage` (AWS SDK v2) | `LocalDocumentStorage` | `app.storage.provider` |
 
-**Mercury (chat / decision).** `inception/mercury-2.5` via OpenRouter. It is a
-reasoning model that spends roughly 1k tokens thinking before it answers, so the
-decision, extraction and explanation calls allow up to 4096 output tokens; a lower cap
-truncates the JSON and fails safe to `HUMAN_REVIEW`.
+**Decision model (the AI judge).** `ParallelDecisionProvider` calls
+`POST https://openrouter.ai/api/alpha/decisions` with model `parallel/decisions-fast`.
+The request's `state` is the `DecisionPromptPayload` (claim, policy terms, retrieved
+clauses, rule results); its one question is a `choice` over `APPROVE`,
+`HUMAN_REVIEW` and `REJECT`, each with a written criterion. The answer is the chosen
+outcome plus a probability for every outcome; the chosen outcome's probability is the
+confidence the guardrails check. Decision models can also consult the live web: the
+sources it used are returned, streamed and shown, and because only the fictional
+policy's evidence should count, a REJECT without a rule basis still goes to a person.
+Server errors are retried; client errors (for example a free-tier daily limit) and
+refusals fail safe to `HUMAN_REVIEW`.
+
+**Chat model (extraction, explanation).** OpenAI-compatible chat via OpenRouter,
+currently `nvidia/nemotron-3.5-super-vl:free`, with strict JSON schemas. Calls allow up
+to 4096 output tokens because reasoning models think before answering; a lower cap
+truncates the JSON (this happened with Mercury 2.5) and fails safe.
 
 **Embeddings.** `EmbeddingProvider` distinguishes `embedQuery` from `embedPassages`
 (defaulting to plain `embed` for symmetric providers). The OpenAI-compatible
@@ -347,7 +365,7 @@ never auto-generated):
 
 - `V1__init_schema.sql` — domain tables, pgvector extension, HNSW index.
 - `V2__users.sql` — `app_user`.
-- `V4__decision_summary.sql` — stores each decision's one-line summary (Mercury's
+- `V4__decision_summary.sql` — stores each decision's one-line summary (the AI's
   reasoning, or the rule engine's), so `GET /claims/{id}/decision` returns it.
 - `V3__evidence_survives_reingestion.sql` — `decision_evidence.policy_chunk_id` becomes
   `ON DELETE SET NULL`, so re-ingesting a document can replace chunks that earlier
@@ -432,7 +450,7 @@ envelope (`timestamp, status, error, message, path, fieldErrors, traceId`).
   version, final decision, latency, traceId, reason codes — operational metadata only)
   and per human review/override. Retrievable at `GET /claims/{id}/audit`.
 - **Decision provenance**: each `decision` row records `model_provider` /
-  `model_name` (`openrouter` / `inception/mercury-2.5` when the AI decided,
+  `model_name` (`openrouter` / `parallel/decisions-fast-…` when the AI decided,
   `deterministic` / `rule-engine` when the rules did) and latency.
 - **Health**: liveness/readiness probes; the AI-provider health check never fails
   liveness on a transient outage.
@@ -444,11 +462,12 @@ envelope (`timestamp, status, error, message, path, fieldErrors, traceId`).
 Environment-driven (`application.yml` + `-dev` / `-test` / `-prod`). Key namespaces:
 `app.storage.*`, `app.embedding.*`, `app.rag.*`, `app.mercury.*`, `app.decision.*`,
 `app.ratelimit.*`, `app.security.*`. Out of the box, dev runs the whole stack **with
-no API keys** (local embedder, Mercury `noop`, local storage); a `.env` flips on the
+no API keys** (local embedder, chat `noop`, local storage); a `.env` flips on the
 real providers:
 
 ```
-MERCURY_PROVIDER=openrouter            MERCURY_MODEL=inception/mercury-2.5
+MERCURY_PROVIDER=openrouter            MERCURY_MODEL=nvidia/nemotron-3.5-super-vl:free
+DECISION_ENGINE=decision-model         DECISION_MODEL=parallel/decisions-fast:free
 EMBEDDING_PROVIDER=openai-compatible   EMBEDDING_BASE_URL=https://integrate.api.nvidia.com/v1
 EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-1b   EMBEDDING_DIM=384
 EMBEDDING_QUERY_INPUT_TYPE=query       EMBEDDING_PASSAGE_INPUT_TYPE=passage
@@ -463,14 +482,16 @@ actuator, and requires real secrets. `.env.example` documents every variable.
 
 ## 13. Testing strategy
 
-**100 backend tests + 22 frontend tests**, all offline/CI-safe (no paid APIs):
+**111 backend tests + 23 frontend tests**, all offline/CI-safe (no paid APIs):
 
-- **Unit**: rule engine + aggregation, extractor normalization, Mercury decision
+- **Unit**: rule engine + aggregation, extractor normalization, decision-model
+  request/response mapping (state, choice question, probabilities, sources, refusal,
+  retry; MockRestServiceServer), LLM decision
   parsing, deterministic embedder, chunker, local storage (path-traversal guard),
   OpenAI-compatible embedding requests (MockRestServiceServer: `input_type` per
   query/passage, `dimensions`, `truncate`, batching, 5xx retry, give-up, dimension
   check, error-body surfacing).
-- **Contract** (MockWebServer): Mercury chat resilience — retry, 4xx no-retry,
+- **Contract** (MockWebServer): chat client resilience — retry, 4xx no-retry,
   timeout, circuit-breaker-opens.
 - **Integration** (Testcontainers): real pgvector (schema validate, cosine search,
   claim/policy/RAG/decision/review/audit APIs, re-embed with `reembed=true`),
@@ -491,30 +512,43 @@ on every PR and `main`.
 
 ---
 
-## 14. Deployment topology
+## 14. Deployment topology (live)
+
+Live at **https://d97tm0469lmul.cloudfront.net**, defined in
+[`infra/aws/template.yaml`](infra/aws/template.yaml) and deployed by
+[`deploy.yml`](.github/workflows/deploy.yml).
 
 ```
-Internet → API Gateway (HTTP API) → Lambda (container: app + Lambda Web Adapter)
-                                        │
-            ┌──────────────────┬────────┴─────────┬──────────────────────┐
-            ▼                  ▼                  ▼                      ▼
-      RDS Postgres         S3 bucket       OpenRouter / Mercury      NVIDIA NIM
-      + pgvector           (documents)     (chat, optional)          (embeddings, optional)
-      (via RDS Proxy)
+Browser ──HTTPS──▶ CloudFront ─── default ──▶ S3 site bucket (React build, OAC)
+                       │
+                       └── /api/*, /actuator/*, /swagger-ui*, /v3/api-docs* ──▶
+                           Lambda Function URL (AuthType NONE, InvokeMode RESPONSE_STREAM)
+                             └─ container image: Spring Boot + AWS Lambda Web Adapter
+                                  ├─▶ Neon Postgres 18 + pgvector (us-east-1, SSL)
+                                  ├─▶ S3 documents bucket (IAM role)
+                                  ├─▶ OpenRouter: decision model + chat model
+                                  └─▶ NVIDIA NIM: embeddings
 ```
 
-- One container image in **ECR**; `Dockerfile.lambda` adds the AWS Lambda Web Adapter
-  so the identical web app serves API Gateway events unchanged. SnapStart for cold
-  starts; RDS Proxy for connection pooling; S3 because Lambda's filesystem is ephemeral.
-- The **same image** (`Dockerfile`) runs on ECS Fargate / App Runner / Render /
-  Cloud Run with no code changes; that is the better target for the SSE endpoint.
-- Commands: [`docs/aws-ecr-deploy.md`](docs/aws-ecr-deploy.md). Full runbook + tradeoffs:
-  [`docs/deploy-aws.md`](docs/deploy-aws.md).
-
-**Honest Lambda tradeoffs**: JVM cold starts (→ SnapStart/provisioned concurrency);
-API Gateway's 29 s timeout (→ async job model for heavy analysis); connection limits
-(→ RDS Proxy); API Gateway buffers responses, so `/analyze/stream` arrives all at
-once there — live streaming needs a container host (or Lambda response streaming).
+- **One origin.** CloudFront serves the UI and forwards the API paths to the Function
+  URL, so there is no CORS. Its origin-request policy forwards every header except
+  `Host` and `Origin`; forwarding the browser's `Origin` would trip Spring's CORS check.
+- **Live SSE on Lambda.** The Function URL streams (`RESPONSE_STREAM`) and the Web
+  Adapter runs with `AWS_LWA_INVOKE_MODE=response_stream`, so stage events arrive as
+  they happen. API Gateway would buffer them.
+- **Start-up.** The adapter waits for `/actuator/health/readiness`, which turns UP only
+  after Spring's startup runners (demo seeding) finish. Waiting on liveness let Lambda
+  freeze the sandbox mid-seeding. 3 GB of memory buys CPU; a cold start is ~30 s
+  (SnapStart does not apply to container images).
+- **Secrets** (DB, JWT, OpenRouter, NVIDIA, operator password) are stack parameters set
+  once into the Lambda's encrypted environment. GitHub never sees them: the deploy job
+  assumes `hcda-github-deploy` through **OIDC**, scoped to this repo's `main` branch and
+  allowed only to push the image, update this function, write the site bucket and
+  invalidate this distribution.
+- **Database.** Neon's free tier (outside AWS, same region); the Lambda stays outside a
+  VPC, so it reaches OpenRouter and NVIDIA without a NAT gateway (~$32/month saved).
+- **Same image elsewhere.** `Dockerfile` runs unchanged on ECS Fargate / App Runner /
+  Cloud Run. An RDS-based runbook and its trade-offs: [`docs/deploy-aws.md`](docs/deploy-aws.md).
 
 ---
 
@@ -528,11 +562,11 @@ design language, built to show the pipeline to a reviewer:
 - **Pipeline view**: seven stages (Authenticate, Load, Retrieve, Rules, AI judge,
   Guardrails, Audit), each a 3D cube that spins while running and lands on a ✓ / ✕ /
   ! / – result face, with the real technology chips, the server-measured duration, and
-  live details (clauses + embedding model, rules passed/flagged, Mercury's raw
-  suggestion and confidence, guardrail overrides, decision/trace ids).
+  live details (clauses + embedding model, rules passed/flagged, the decision model's
+  probabilities, guardrail overrides, decision/trace ids).
 - **Panels**: claim, facts, policy, verdict (confidence ring, dataset-label match),
-  **what the AI compared** (the exact input from the `AI STARTED` event and Mercury's
-  reply, or why Mercury was not called), policy evidence, AI explanation, human review
+  **what the AI compared** (the exact input from the `AI STARTED` event, the decision
+  model's probability bars and any web sources it consulted, or why it was not called), policy evidence, AI explanation, human review
   (REVIEWER/ADMIN), audit trail (ADMIN).
 - **Policy rulebook** (`#/policies`): every policy from PostgreSQL — the terms the Java
   rules check (dates, coverage, waiting periods, exclusions) and the indexed wording in
@@ -569,8 +603,10 @@ design language, built to show the pipeline to a reviewer:
   between chunks and their vectors, simpler ops.
 - **Rules + AI (not AI-only)** — safety, determinism, auditability, and cost control;
   the model assists judgment but cannot cause an ungrounded approve/reject.
-- **Mercury for the judge** — a diffusion LLM is fast enough that the one model call
-  per claim stays at a few seconds, which keeps the streamed demo responsive.
+- **A decision model for the judge** — the judge's job is to pick one of three
+  outcomes, not to write prose. A decision model returns calibrated probabilities per
+  outcome in about a second, which is faster, cheaper and easier to put guardrails
+  around than parsing an LLM's JSON. The LLM judge stays available by configuration.
 - **Matryoshka dimensions over a re-migration** — asking the embedding model for 384-d
   vectors kept the existing column and HNSW index; only the vectors were rebuilt.
 - **SSE over WebSockets** — one-way progress fits SSE; it reuses the existing HTTP,

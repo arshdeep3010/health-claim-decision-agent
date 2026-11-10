@@ -17,7 +17,7 @@ const STACK: { group: string; items: [string, string][] }[] = [
   { group: 'Backend', items: [['Java 21', 'language'], ['Spring Boot 3.5', 'web, validation'], ['Spring Security', 'JWT, roles'], ['Spring Data JPA', 'persistence'], ['Flyway', 'migrations']] },
   { group: 'Data & retrieval', items: [['PostgreSQL 16', 'system of record'], ['pgvector', 'vector search'], ['PDFBox', 'PDF parsing'], ['Chunking', 'heading-aware'], ['NVIDIA NIM', 'nemotron embeddings, 384-d']] },
   { group: 'AI', items: [['Parallel Decisions', 'decision model, probabilities'], ['Nemotron 3.5 Super', 'explanations, fact extraction'], ['OpenRouter', 'one key, both models'], ['Resilience4j', 'retry, circuit breaker'], ['Provider abstraction', 'swap models']] },
-  { group: 'Quality & ops', items: [['Testcontainers · Vitest', '122 tests'], ['GitHub Actions', 'CI + image publish'], ['Docker', 'multi-stage, non-root'], ['AWS Lambda + ECR', 'deploy target'], ['Micrometer', 'Prometheus metrics']] },
+  { group: 'Quality & ops', items: [['Testcontainers · Vitest', '134 tests'], ['GitHub Actions', 'CI + image publish'], ['Docker', 'multi-stage, non-root'], ['AWS Lambda + ECR', 'deploy target'], ['Micrometer', 'Prometheus metrics']] },
 ]
 
 // Every condition for an automatic approval, and which part of the system checks it.
@@ -52,7 +52,7 @@ export function Landing({ onSignIn, signingIn, error, signedIn, onOpenClaims }: 
 
       <section className="container" style={{ paddingBottom: 40 }}>
         <motion.div className="stats" {...reveal}>
-          {[['7', 'pipeline stages'], ['3', 'possible outcomes'], ['30', 'labeled test claims'], ['122', 'automated tests']].map(([n, l]) => (
+          {[['7', 'pipeline stages'], ['3', 'possible outcomes'], ['30', 'labeled test claims'], ['134', 'automated tests']].map(([n, l]) => (
             <div className="stat" key={l}><b>{n}</b><span>{l}</span></div>
           ))}
         </motion.div>
