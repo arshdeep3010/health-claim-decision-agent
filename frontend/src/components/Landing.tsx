@@ -16,7 +16,7 @@ const reveal = {
 const STACK: { group: string; items: [string, string][] }[] = [
   { group: 'Backend', items: [['Java 21', 'language'], ['Spring Boot 3.5', 'web, validation'], ['Spring Security', 'JWT, roles'], ['Spring Data JPA', 'persistence'], ['Flyway', 'migrations']] },
   { group: 'Data & retrieval', items: [['PostgreSQL 16', 'system of record'], ['pgvector', 'vector search'], ['PDFBox', 'PDF parsing'], ['Chunking', 'heading-aware'], ['NVIDIA NIM', 'nemotron embeddings, 384-d']] },
-  { group: 'AI', items: [['Mercury 2.5', 'decision + explanation'], ['OpenRouter', 'OpenAI-compatible'], ['JSON schema', 'strict outputs'], ['Resilience4j', 'retry, circuit breaker'], ['Provider abstraction', 'swap models']] },
+  { group: 'AI', items: [['Parallel Decisions', 'decision model, probabilities'], ['Nemotron 3.5 Super', 'explanations, fact extraction'], ['OpenRouter', 'one key, both models'], ['Resilience4j', 'retry, circuit breaker'], ['Provider abstraction', 'swap models']] },
   { group: 'Quality & ops', items: [['Testcontainers · Vitest', '122 tests'], ['GitHub Actions', 'CI + image publish'], ['Docker', 'multi-stage, non-root'], ['AWS Lambda + ECR', 'deploy target'], ['Micrometer', 'Prometheus metrics']] },
 ]
 
@@ -28,8 +28,8 @@ const APPROVAL: { text: string; who: string; ai?: boolean }[] = [
   { text: 'General and pre-existing waiting periods have passed', who: 'Java rule' },
   { text: 'Pre-existing condition status is known', who: 'Java rule' },
   { text: 'Every required fact is present and none conflict', who: 'Java rules' },
-  { text: 'Mercury reads the claim against the retrieved policy wording and suggests approve', who: 'AI advises', ai: true },
-  { text: 'Mercury’s confidence is at least 0.5, so Java accepts its suggestion', who: 'Java guardrail' },
+  { text: 'A decision model weighs the claim against the retrieved policy wording and picks approve', who: 'AI advises', ai: true },
+  { text: 'Its probability for approve is at least 0.5, so Java accepts the suggestion', who: 'Java guardrail' },
 ]
 
 const GUARDS = [
@@ -106,9 +106,9 @@ export function Landing({ onSignIn, signingIn, error, signedIn, onOpenClaims }: 
             <h3>Who makes the decision? Java.</h3>
             <p className="body-2" style={{ margin: '8px 0 0' }}>
               The seven rules (<span className="mono">RuleEngine</span>) and the guardrails (<span className="mono">DecisionOrchestrator</span>)
-              are plain Java. Mercury is called only after every rule passes, gets a fixed JSON package (the claim, the policy’s
-              terms, the retrieved clauses and the rule results) and returns a suggestion. Java decides whether to accept it, and an
-              AI-only rejection always goes to a person.
+              are plain Java. A decision model (Parallel Decisions Fast) is called only after every rule passes. It gets a fixed
+              package (the claim, the policy’s terms, the retrieved clauses and the rule results) and returns a probability for
+              each outcome in about two seconds. Java decides whether to accept it, and an AI-only rejection always goes to a person.
             </p>
             <p style={{ margin: '14px 0 0' }}>
               <a className="link-btn" href={signedIn ? '#/policies' : '#demo'} style={{ fontSize: 15 }}>

@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -244,21 +245,26 @@ public class DecisionOrchestrator {
         // Show exactly what the model is given to compare against (same object it receives).
         emit(listener, StageEvent.started(AnalysisStage.AI, details(
                 "provider", decisionProvider.providerId(),
-                "instructions", DecisionPromptPayload.INSTRUCTIONS,
+                "engine", Objects.requireNonNullElse(decisionProvider.engine(), "llm"),
+                "model", decisionProvider.modelName(),
+                "instructions", Objects.requireNonNullElse(decisionProvider.instructions(),
+                        DecisionPromptPayload.INSTRUCTIONS),
                 "input", DecisionPromptPayload.build(context))));
         long aiStart = System.nanoTime();
         try {
             ai = decisionProvider.decide(context);
             metrics.recordAiCall(decisionProvider.providerId(), "claim-decision", true);
             metrics.recordAiLatency(decisionProvider.providerId(), ai.latencyMs());
-            emit(listener, StageEvent.completed(AnalysisStage.AI, millisSince(aiStart), details(
+            Map<String, Object> completed = details(
                     "suggestion", ai.decision().name(),
                     "confidence", ai.confidence(),
                     "provider", ai.modelProvider(),
                     "model", ai.model(),
                     "summary", ai.summary(),
                     "reasonCodes", ai.reasonCodes(),
-                    "uncertainties", ai.uncertainties())));
+                    "uncertainties", ai.uncertainties());
+            completed.putAll(ai.extras()); // e.g. a decision model's probabilities and sources
+            emit(listener, StageEvent.completed(AnalysisStage.AI, millisSince(aiStart), completed));
         } catch (Exception e) {
             // Any AI/provider/parse failure -> HUMAN_REVIEW (never auto approve/reject).
             metrics.recordAiCall(decisionProvider.providerId(), "claim-decision", false);

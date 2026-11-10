@@ -131,8 +131,12 @@ Resources:
           S3_REGION: !Ref AWS::Region
           MERCURY_PROVIDER: openrouter
           MERCURY_BASE_URL: https://openrouter.ai/api/v1
-          MERCURY_MODEL: inception/mercury-2.5
+          # Chat model for explanations and fact extraction (OpenAI-compatible client).
+          MERCURY_MODEL: "nvidia/nemotron-3.5-super-vl:free"
           MERCURY_API_KEY: !Ref MercuryApiKey
+          # The AI judge: a decision model via OpenRouter's Decisions API (same key).
+          DECISION_ENGINE: decision-model
+          DECISION_MODEL: "parallel/decisions-fast:free"
           EMBEDDING_PROVIDER: openai-compatible
           EMBEDDING_BASE_URL: https://integrate.api.nvidia.com/v1
           EMBEDDING_MODEL: nvidia/nemotron-3.5-embed-1b

@@ -15,6 +15,25 @@ export function took(ms: number) {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
 }
 
+const OUTCOMES = ['APPROVE', 'HUMAN_REVIEW', 'REJECT'] as const
+
+/** A decision model's per-outcome probabilities, or null when the engine gave none. */
+export function probabilities(v: unknown): Record<string, number> | null {
+  if (!v || typeof v !== 'object') return null
+  const out: Record<string, number> = {}
+  for (const k of OUTCOMES) {
+    const p = (v as Record<string, unknown>)[k]
+    if (typeof p === 'number') out[k] = p
+  }
+  return Object.keys(out).length ? out : null
+}
+
+/** "approve 99% · review 1% · reject 0%" */
+export function probabilityLine(p: Record<string, number>) {
+  const name: Record<string, string> = { APPROVE: 'approve', HUMAN_REVIEW: 'review', REJECT: 'reject' }
+  return OUTCOMES.filter(k => k in p).map(k => `${name[k]} ${Math.round(p[k] * 100)}%`).join(' · ')
+}
+
 /** The final display state for a COMPLETED / SKIPPED / FAILED event. */
 export function finalStatus(e: StageEvent): StageStatus {
   const d = e.data ?? {}
@@ -57,9 +76,14 @@ export function finalStatus(e: StageEvent): StageStatus {
     }
     case 'AI': {
       const suggestion = str(d.suggestion) || 'HUMAN_REVIEW'
+      const probs = probabilities(d.probabilities)
       const conf = typeof d.confidence === 'number' ? `${Math.round(d.confidence * 100)}% confidence` : 'no confidence given'
+      const sources = Array.isArray(d.sources) ? d.sources.length : 0
+      const who = d.engine === 'decision-model' ? 'Decision model' : 'AI'
       return { state: 'done', tone: DECISION_COPY[suggestion]?.tone ?? 'warn',
-        result: `Mercury suggests ${suggestion.replace('_', ' ').toLowerCase()}`, detail: [conf, t, str(d.model)] }
+        result: `${who} suggests ${suggestion.replace('_', ' ').toLowerCase()}`,
+        detail: [probs ? probabilityLine(probs) : conf, t, str(d.model), sources ? `${sources} web source${sources === 1 ? '' : 's'}` : '']
+          .filter(Boolean) }
     }
     case 'GUARDRAILS': {
       const copy = DECISION_COPY[str(d.decision)] ?? DECISION_COPY.HUMAN_REVIEW

@@ -181,6 +181,24 @@ class DecisionWithAiIntegrationTest {
     }
 
     @Test
+    void streamCarriesADecisionModelsProbabilitiesAndSources() throws Exception {
+        Map<String, Object> extras = Map.of(
+                "engine", "decision-model",
+                "probabilities", Map.of("APPROVE", 0.91, "HUMAN_REVIEW", 0.07, "REJECT", 0.02),
+                "sources", List.of(Map.of("url", "https://example.org/p.pdf", "title", "A policy")));
+        when(decisionProvider.decide(any())).thenReturn(new AiDecision(DecisionType.APPROVE, 0.91,
+                List.of("DECISION_MODEL_APPROVE"), "Decision model chose approve", List.of(),
+                "openrouter", "parallel/decisions-fast", 1200L, 0, extras));
+        String claimId = cleanClaim("POL-AI-DM");
+
+        JsonNode ai = stageEvent(stream(claimId), "AI", "COMPLETED");
+        assertThat(ai.at("/data/engine").asText()).isEqualTo("decision-model");
+        assertThat(ai.at("/data/probabilities/APPROVE").asDouble()).isEqualTo(0.91);
+        assertThat(ai.at("/data/sources/0/url").asText()).isEqualTo("https://example.org/p.pdf");
+        assertThat(ai.at("/data/model").asText()).isEqualTo("parallel/decisions-fast");
+    }
+
+    @Test
     void streamShowsAiSkippedWhenRulesDecide() throws Exception {
         String claimId = cleanClaim("POL-AI6", false); // no pre-existing declaration -> rules REVIEW
 

@@ -28,9 +28,9 @@ export const STAGES: StageDef[] = [
   { id: 'rules', short: 'Rules', index: '04', glyph: 'IF', title: 'Run deterministic rules',
     what: 'Seven Java rules check policy dates, exclusions, coverage limit, waiting periods, pre-existing status and missing or conflicting facts.',
     tech: ['Java 21', 'Rule engine', 'No AI involved'] },
-  { id: 'ai', short: 'AI judge', index: '05', glyph: 'AI', title: 'Ask the AI judge',
-    what: 'Only when every rule passes, Mercury reviews the facts and evidence and must answer in a strict JSON schema.',
-    tech: ['Mercury 2.5', 'OpenRouter', 'JSON schema', 'Resilience4j'] },
+  { id: 'ai', short: 'AI judge', index: '05', glyph: 'AI', title: 'Ask the decision model',
+    what: 'Only when every rule passes, a decision model weighs the claim against the retrieved policy evidence and returns a probability for each outcome in about two seconds.',
+    tech: ['Parallel Decisions', 'OpenRouter', 'Per-outcome probabilities', 'Retry + timeout'] },
   { id: 'guard', short: 'Guardrails', index: '06', glyph: '⚖', title: 'Apply safety guardrails',
     what: 'Java owns the verdict: low confidence, an unsupported AI rejection or any AI failure is routed to a human.',
     tech: ['Spring Boot 3.5', 'Confidence ≥ 0.5', 'Human-in-the-loop'] },
@@ -56,6 +56,8 @@ export const RULE_LABELS: Record<string, string> = {
   CONFLICTING_INFORMATION: 'Conflicting facts', AI_PROVIDER_FAILURE: 'AI provider failed',
   LOW_AI_CONFIDENCE: 'AI confidence too low', AI_SUGGESTED_REJECT_NO_DETERMINISTIC_BASIS: 'AI reject overruled',
   RAG_FAILURE: 'Evidence retrieval failed',
+  DECISION_MODEL_APPROVE: 'Decision model: approve', DECISION_MODEL_HUMAN_REVIEW: 'Decision model: review',
+  DECISION_MODEL_REJECT: 'Decision model: reject',
   AI_DECISION: 'Analysis recorded', HUMAN_REVIEW: 'Needs review', HUMAN_REVIEW_SUBMITTED: 'Human review submitted',
 }
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { analyzeStream, api, ApiError, type AuditEvent, type Claim, type Decision, type Fact, type Policy, type Review, type Session, type StageEvent } from '../api'
 import { Pipeline } from './Pipeline'
-import { StagePacer } from '../streamStages'
+import { probabilities, probabilityLine, StagePacer } from '../streamStages'
 import { DECISION_COPY, humanize, idlePipeline, type PipelineStatus, type StageId, type StageStatus } from '../pipeline'
 import { money, parseJson, statusLabel, statusTone } from '../format'
 import scenarios from '../data/scenarios.json'
@@ -17,9 +17,12 @@ interface AiInput {
   policyEvidence: { section: string | null; page: number | null; text: string }[]
   ruleReasonCodes: string[]
 }
-interface AiOutput { suggestion: string; confidence: number | null; model: string; summary: string; reasonCodes: string[]; elapsedMs: number }
+interface AiOutput {
+  suggestion: string; confidence: number | null; model: string; summary: string; reasonCodes: string[]; elapsedMs: number
+  probabilities: Record<string, number> | null; sources: { url: string; title: string }[]
+}
 type AiTrace =
-  | { kind: 'called'; provider: string; instructions: string; input: AiInput; output?: AiOutput; failed?: boolean }
+  | { kind: 'called'; provider: string; engine: string; model: string; instructions: string; input: AiInput; output?: AiOutput; failed?: boolean }
   | { kind: 'skipped'; reason: string; flagged: string[]; outcome: string }
 const rise = {
   initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: 8 },
@@ -78,13 +81,16 @@ export function ClaimView({ session, claimId, onBack }: { session: Session; clai
       if (e.stage === 'RULES' && e.status === 'COMPLETED') {
         rules = { outcome: String(d.outcome ?? ''), flagged: (d.flagged as string[]) ?? [] }
       } else if (e.stage === 'AI' && e.status === 'STARTED' && d.input) {
-        setTrace({ kind: 'called', provider: String(d.provider ?? ''), instructions: String(d.instructions ?? ''), input: d.input as AiInput })
+        setTrace({ kind: 'called', provider: String(d.provider ?? ''), engine: String(d.engine ?? 'llm'), model: String(d.model ?? ''),
+          instructions: String(d.instructions ?? ''), input: d.input as AiInput })
       } else if (e.stage === 'AI' && e.status === 'COMPLETED') {
         const output: AiOutput = {
           suggestion: String(d.suggestion ?? ''), confidence: typeof d.confidence === 'number' ? d.confidence : null,
           model: String(d.model ?? ''), summary: String(d.summary ?? ''), reasonCodes: (d.reasonCodes as string[]) ?? [], elapsedMs: e.elapsedMs,
+          probabilities: probabilities(d.probabilities),
+          sources: Array.isArray(d.sources) ? (d.sources as { url: string; title: string }[]).filter(x => x && x.url) : [],
         }
-        setTrace(t => (t && t.kind === 'called' ? { ...t, output } : t))
+        setTrace(t => (t && t.kind === 'called' ? { ...t, model: output.model || t.model, output } : t))
       } else if (e.stage === 'AI' && e.status === 'FAILED') {
         setTrace(t => (t && t.kind === 'called' ? { ...t, failed: true } : t))
       } else if (e.stage === 'AI' && e.status === 'SKIPPED') {
@@ -338,8 +344,8 @@ function EvidencePanel({ decision }: { decision: Decision }) {
 
 function AiInputPanel({ trace, decision }: { trace: AiTrace | null; decision: Decision }) {
   const [raw, setRaw] = useState(false)
-  const note = 'Java decides. This is exactly what Mercury was given on this run, and nothing else reaches the model.'
-  const noAiNote = 'Java decides. Mercury is consulted only when every Java rule passes.'
+  const note = 'Java decides. This is exactly what the AI judge was given on this run, and nothing else reaches it.'
+  const noAiNote = 'Java decides. The AI judge is consulted only when every Java rule passes.'
 
   if (!trace) {
     const byRules = decision.modelProvider === 'deterministic'
@@ -347,8 +353,8 @@ function AiInputPanel({ trace, decision }: { trace: AiTrace | null; decision: De
       <Panel title="What the AI compared" note={noAiNote}>
         <p className="body-2" style={{ margin: 0 }}>
           {byRules
-            ? 'Java’s rules decided this claim, so Mercury was not called.'
-            : 'Analyze the claim to capture the exact input sent to Mercury and its reply, live from the stream.'}
+            ? 'Java’s rules decided this claim, so the AI judge was not called.'
+            : 'Analyze the claim to capture the exact input sent to the AI judge and its answer, live from the stream.'}
         </p>
       </Panel>
     )
@@ -359,8 +365,8 @@ function AiInputPanel({ trace, decision }: { trace: AiTrace | null; decision: De
       <Panel title="What the AI compared" note={noAiNote}>
         <div className="notice info">
           {trace.reason === 'RULES_DECIDED'
-            ? <>Mercury was not called. Java’s rules decided first ({trace.outcome === 'REJECT' ? 'rejected' : 'sent to review'}).</>
-            : <>Mercury was not called: no policy evidence could be retrieved, so Java sent the claim to a person.</>}
+            ? <>The AI judge was not called. Java’s rules decided first ({trace.outcome === 'REJECT' ? 'rejected' : 'sent to review'}).</>
+            : <>The AI judge was not called: no policy evidence could be retrieved, so Java sent the claim to a person.</>}
         </div>
         {trace.flagged.length > 0 && (
           <div className="reason-list" style={{ marginTop: 14 }}>
@@ -373,6 +379,8 @@ function AiInputPanel({ trace, decision }: { trace: AiTrace | null; decision: De
 
   const { input, output } = trace
   const known = input.extractedFacts.filter(f => f.status === 'KNOWN').length
+  const isDecisionModel = trace.engine === 'decision-model'
+  const who = isDecisionModel ? 'The decision model' : 'The AI'
   return (
     <Panel title="What the AI compared" note={note}>
       <div className="ai-io">
@@ -410,27 +418,42 @@ function AiInputPanel({ trace, decision }: { trace: AiTrace | null; decision: De
           </div>
         </div>
         <div className="box">
-          <h4>Mercury replied</h4>
+          <h4>{who} answered{trace.model ? ` · ${trace.model}` : ''}</h4>
           {trace.failed && <p className="body-2" style={{ margin: 0 }}>The AI call failed, so Java sent the claim to a person.</p>}
-          {!trace.failed && !output && <p className="body-2" style={{ margin: 0 }}>Waiting for {trace.provider}…</p>}
+          {!trace.failed && !output && <p className="body-2" style={{ margin: 0 }}>Waiting for the answer…</p>}
           {output && (
             <>
               <p style={{ margin: 0, fontSize: 16 }}>
                 Suggests <b>{output.suggestion.replace('_', ' ').toLowerCase()}</b>
-                {output.confidence != null && <> at <b>{Math.round(output.confidence * 100)}%</b> confidence</>}
-                <span className="body-2" style={{ fontSize: 13 }}> · {output.model} · {(output.elapsedMs / 1000).toFixed(1)} s</span>
+                {output.confidence != null && <> at <b>{Math.round(output.confidence * 100)}%</b> {isDecisionModel ? 'probability' : 'confidence'}</>}
+                <span className="body-2" style={{ fontSize: 13 }}> · {(output.elapsedMs / 1000).toFixed(1)} s</span>
               </p>
-              {output.summary && <p className="snippet" style={{ marginTop: 8 }}>“{output.summary}”</p>}
-              <p className="body-2" style={{ margin: '10px 0 0', fontSize: 13.5 }}>
+              {output.probabilities && <ProbabilityBars probabilities={output.probabilities} chosen={output.suggestion} />}
+              {output.summary && !output.probabilities && <p className="snippet" style={{ marginTop: 8 }}>“{output.summary}”</p>}
+              <p className="body-2" style={{ margin: '12px 0 0', fontSize: 13.5 }}>
                 Java’s call: <b style={{ color: 'var(--text)' }}>{DECISION_COPY[decision.decision]?.word ?? decision.decision}</b>
                 {decision.decision === output.suggestion ? ' (the guardrails accepted the suggestion)' : ' (the guardrails overrode the suggestion)'}
               </p>
+              {output.sources.length > 0 && (
+                <details className="sources">
+                  <summary>It also consulted {output.sources.length} web source{output.sources.length === 1 ? '' : 's'}</summary>
+                  <p className="body-2" style={{ fontSize: 12.5, margin: '6px 0 8px' }}>
+                    Decision models can search the live web. The policy here is fictional, so only the evidence above should
+                    count, which is why an AI-only rejection always goes to a person.
+                  </p>
+                  <ul>
+                    {output.sources.map(s => (
+                      <li key={s.url}><a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a></li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </>
           )}
         </div>
       </div>
       <button className="link-btn" onClick={() => setRaw(r => !r)} style={{ fontSize: 14, marginTop: 14 }} aria-expanded={raw}>
-        {raw ? 'Hide' : 'Show'} the raw prompt and JSON
+        {raw ? 'Hide' : 'Show'} the raw request
       </button>
       {raw && (
         <>
@@ -439,6 +462,25 @@ function AiInputPanel({ trace, decision }: { trace: AiTrace | null; decision: De
         </>
       )}
     </Panel>
+  )
+}
+
+function ProbabilityBars({ probabilities, chosen }: { probabilities: Record<string, number>; chosen: string }) {
+  const outcomes = (['APPROVE', 'HUMAN_REVIEW', 'REJECT'] as const).filter(k => k in probabilities)
+  return (
+    <div className="prob-bars" role="img" aria-label={`Probabilities: ${probabilityLine(probabilities)}`}>
+      {outcomes.map(k => (
+        <div className="prob-row" key={k} data-tone={DECISION_COPY[k].tone} data-on={k === chosen}>
+          <span>{DECISION_COPY[k].word}</span>
+          <span className="prob-track">
+            <motion.span className="prob-fill" initial={{ width: 0 }}
+              animate={{ width: `${Math.max(1, probabilities[k] * 100)}%` }}
+              transition={{ type: 'spring', bounce: 0, duration: 0.9 }} />
+          </span>
+          <b>{Math.round(probabilities[k] * 100)}%</b>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -472,7 +514,7 @@ function ExplainPanel({ claimId, session, decisionId }: { claimId: string; sessi
     try { setText((await api(session).explain(claimId)).explanation) } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   return (
-    <Panel title="Plain-English explanation" note="Written by Mercury from the stored decision, its reasons and evidence.">
+    <Panel title="Plain-English explanation" note="Written by an LLM from the stored decision, its reasons and evidence. It can never change the decision.">
       {!text && (
         <button className="btn btn-secondary btn-sm" onClick={go} disabled={busy}>
           {busy ? <><span className="spinner" /> Writing</> : 'Explain this decision'}

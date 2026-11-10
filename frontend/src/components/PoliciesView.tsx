@@ -38,7 +38,7 @@ export function PoliciesView({ session }: { session: Session }) {
         <h1 className="headline" style={{ marginTop: 8 }}>What every claim is checked against.</h1>
         <p className="subhead" style={{ marginTop: 14, maxWidth: 760 }}>
           Each policy has two parts. Its structured terms are what the seven Java rules check. Its wording is split into
-          chunks, embedded and stored in pgvector; the closest chunks are retrieved as evidence and handed to Mercury.
+          chunks, embedded and stored in pgvector; the closest chunks are retrieved as evidence and handed to the decision model.
         </p>
       </motion.div>
 
@@ -54,7 +54,7 @@ export function PoliciesView({ session }: { session: Session }) {
           <span className="chip">Evidence for the AI</span>
           <p className="body-2" style={{ margin: '10px 0 0' }}>
             Policy wording in pgvector{models.length ? <> (embedded with <span className="mono">{models.join(', ')}</span>)</> : null}.
-            Mercury only sees the chunks retrieved for a claim, and only after every rule has passed.
+            The decision model only sees the chunks retrieved for a claim, and only after every rule has passed.
           </p>
         </div>
       </div>

@@ -374,3 +374,18 @@ textarea.input:focus { outline: none; box-shadow: 0 0 0 4px var(--accent-soft), 
 .nav-user > * { white-space: nowrap; }
 .brand { white-space: nowrap; }
 @media (max-width: 1100px) { .nav-links .nav-anchor { display: none; } }
+
+/* ---------- Decision-model probabilities ---------- */
+.prob-bars { display: grid; gap: 7px; margin-top: 12px; }
+.prob-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 44px; gap: 10px; align-items: center; font-size: 13.5px; color: var(--text-2); }
+.prob-row[data-on="true"] { color: var(--text); font-weight: 600; }
+.prob-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.prob-track { height: 8px; border-radius: 8px; background: var(--hairline); overflow: hidden; }
+.prob-fill { display: block; height: 100%; border-radius: 8px; background: var(--text-3); }
+.prob-row[data-tone="pass"] .prob-fill { background: var(--pass-fill); }
+.prob-row[data-tone="warn"] .prob-fill { background: var(--warn-fill); }
+.prob-row[data-tone="stop"] .prob-fill { background: var(--stop-fill); }
+.sources { margin-top: 12px; font-size: 13.5px; }
+.sources summary { cursor: pointer; color: var(--accent); }
+.sources ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.sources a { color: var(--accent); overflow-wrap: anywhere; }

@@ -98,6 +98,16 @@ app:
   decision:
     min-confidence: ${DECISION_MIN_CONFIDENCE:0.5}
     evidence-top-k: ${DECISION_EVIDENCE_TOP_K:5}
+  # Which engine judges a claim once the rules allow it: "llm" (chat model + JSON schema,
+  # app.mercury.* settings) or "decision-model" (Parallel Decisions via OpenRouter's
+  # Decisions API; returns a probability per outcome). The key defaults to the chat key.
+  decision-model:
+    engine: ${DECISION_ENGINE:llm}
+    base-url: ${DECISION_MODEL_BASE_URL:https://openrouter.ai/api}
+    api-key: ${DECISION_MODEL_API_KEY:${MERCURY_API_KEY:}}
+    model: "${DECISION_MODEL:parallel/decisions-fast:free}"
+    timeout-ms: ${DECISION_MODEL_TIMEOUT_MS:30000}
+    max-retries: ${DECISION_MODEL_MAX_RETRIES:2}
   ratelimit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     limit-for-period: ${RATE_LIMIT_PER_PERIOD:30}       # expensive AI endpoints, per caller

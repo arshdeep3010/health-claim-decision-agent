@@ -37,9 +37,19 @@ describe('finalStatus', () => {
   })
 
   it('reports the AI suggestion with its confidence and model', () => {
-    const s = finalStatus(ev('AI', 'COMPLETED', { suggestion: 'APPROVE', confidence: 0.95, model: 'inception/mercury-2.5' }, 3600))
-    expect(s).toMatchObject({ tone: 'pass', result: 'Mercury suggests approve' })
-    expect(s.detail).toEqual(['95% confidence', '3.6 s', 'inception/mercury-2.5'])
+    const s = finalStatus(ev('AI', 'COMPLETED', { suggestion: 'APPROVE', confidence: 0.95, model: 'some/llm' }, 3600))
+    expect(s).toMatchObject({ tone: 'pass', result: 'AI suggests approve' })
+    expect(s.detail).toEqual(['95% confidence', '3.6 s', 'some/llm'])
+  })
+
+  it('shows a decision model’s probability for every outcome and its web sources', () => {
+    const s = finalStatus(ev('AI', 'COMPLETED', {
+      engine: 'decision-model', suggestion: 'REJECT', confidence: 0.85, model: 'parallel/decisions-fast',
+      probabilities: { APPROVE: 0.05, HUMAN_REVIEW: 0.104, REJECT: 0.846 },
+      sources: [{ url: 'https://a.example' }, { url: 'https://b.example' }],
+    }, 1300))
+    expect(s).toMatchObject({ tone: 'stop', result: 'Decision model suggests reject' })
+    expect(s.detail).toEqual(['approve 5% · review 10% · reject 85%', '1.3 s', 'parallel/decisions-fast', '2 web sources'])
   })
 
   it('makes clear the AI was not called when the rules decided', () => {
