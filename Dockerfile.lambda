@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+#
+# Lambda image: identical application to the main Dockerfile, plus the AWS Lambda
+# Web Adapter so the SAME Spring Boot web app runs behind API Gateway on Lambda
+# with no code changes. Build:  docker build -f Dockerfile.lambda -t <ecr>/hcda:latest .
+#
+# The adapter is an inert extension outside the Lambda runtime, so this image also
+# runs locally like the main one.
+
+# ---- Build stage ----
+FROM maven:3.9.9-eclipse-temurin-21 AS build
+WORKDIR /build
+COPY pom.xml .
+COPY src ./src
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp clean package -DskipTests \
+    && cp target/health-claim-decision-agent-*.jar app.jar
+
+# ---- Runtime stage ----
+FROM eclipse-temurin:21-jre AS runtime
+
+# AWS Lambda Web Adapter (pinned). Proxies API Gateway events to the app's HTTP port.
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.1.0 /lambda-adapter /opt/extensions/lambda-adapter
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system app \
+    && useradd --system --gid app --home /app app \
+    && mkdir -p /app/data/storage && chown -R app:app /app
+
+WORKDIR /app
+COPY --from=build --chown=app:app /build/app.jar /app/app.jar
+
+USER app
+EXPOSE 8080
+
+# Lambda Web Adapter: app port + readiness path (does not depend on AI providers).
+ENV AWS_LWA_PORT=8080 \
+    AWS_LWA_READINESS_CHECK_PATH=/actuator/health/liveness \
+    JAVA_OPTS="-XX:MaxRAMPercentage=75.0"
+
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

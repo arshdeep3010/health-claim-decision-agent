@@ -1,0 +1,14 @@
+# Test profile: the datasource is provided dynamically by Testcontainers
+# (@ServiceConnection), so no datasource URL is configured here.
+spring:
+  jpa:
+    show-sql: false
+app:
+  storage:
+    local:
+      base-dir: ${java.io.tmpdir}/hcda-test-storage
+logging:
+  level:
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
+    org.flywaydb: INFO

@@ -1,0 +1,33 @@
+# Production profile: everything comes from the environment; nothing sensitive is defaulted.
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+  jpa:
+    open-in-view: false
+    show-sql: false
+
+# Swagger/OpenAPI off by default in production (enable deliberately + protect it).
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+
+management:
+  endpoint:
+    health:
+      show-details: when_authorized
+
+# Native JSON structured logging in production (Spring Boot 3.4+), carrying traceId.
+logging:
+  structured:
+    format:
+      console: logstash
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never

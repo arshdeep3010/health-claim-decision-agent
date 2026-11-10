@@ -1,0 +1,140 @@
+spring:
+  application:
+    name: health-claim-decision-agent
+  profiles:
+    # Overridden by SPRING_PROFILES_ACTIVE in real deployments.
+    default: dev
+  jpa:
+    hibernate:
+      # Schema is owned by Flyway; Hibernate only validates that entities match it.
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    placeholders:
+      # pgvector column dimension; override with EMBEDDING_DIM to match your model.
+      embeddingDim: ${EMBEDDING_DIM:384}
+  servlet:
+    multipart:
+      max-file-size: 15MB
+      max-request-size: 20MB
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always   # tightened to when_authorized in prod profile
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  info:
+    build:
+      enabled: true
+    java:
+      enabled: true
+    os:
+      enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  storage:
+    provider: ${STORAGE_PROVIDER:local}
+    local:
+      base-dir: ${STORAGE_LOCAL_DIR:./data/storage}
+    s3:
+      endpoint: ${S3_ENDPOINT:}        # blank = real AWS; set for MinIO/R2/S3-compatible
+      region: ${S3_REGION:us-east-1}
+      bucket: ${S3_BUCKET:}
+      access-key: ${S3_ACCESS_KEY:}    # blank = default AWS credentials chain (IAM role)
+      secret-key: ${S3_SECRET_KEY:}
+      path-style: ${S3_PATH_STYLE:false}
+  upload:
+    max-size-bytes: ${UPLOAD_MAX_SIZE_BYTES:15728640}   # 15 MiB
+  ingestion:
+    chunk-size: ${INGESTION_CHUNK_SIZE:1000}
+    chunk-overlap: ${INGESTION_CHUNK_OVERLAP:150}
+    min-chunk-size: ${INGESTION_MIN_CHUNK_SIZE:200}
+  embedding:
+    provider: ${EMBEDDING_PROVIDER:local}          # local | openai-compatible
+    model: ${EMBEDDING_MODEL:}
+    base-url: ${EMBEDDING_BASE_URL:}
+    api-key: ${EMBEDDING_API_KEY:}
+    dim: ${EMBEDDING_DIM:384}                       # MUST match the pgvector column
+    # Optional extras for hosted retrieval models (e.g. NVIDIA NIM); blank = omitted from the request.
+    query-input-type: ${EMBEDDING_QUERY_INPUT_TYPE:}     # NVIDIA: query
+    passage-input-type: ${EMBEDDING_PASSAGE_INPUT_TYPE:} # NVIDIA: passage
+    request-dimensions: ${EMBEDDING_REQUEST_DIMENSIONS:false} # send dimensions=dim (Matryoshka models)
+    truncate: ${EMBEDDING_TRUNCATE:}                     # NVIDIA: END
+    batch-size: ${EMBEDDING_BATCH_SIZE:32}
+  rag:
+    top-k: ${RAG_TOP_K:5}
+    max-snippet-length: ${RAG_MAX_SNIPPET_LENGTH:500}
+  decision:
+    min-confidence: ${DECISION_MIN_CONFIDENCE:0.5}
+    evidence-top-k: ${DECISION_EVIDENCE_TOP_K:5}
+  ratelimit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    limit-for-period: ${RATE_LIMIT_PER_PERIOD:30}       # expensive AI endpoints, per caller
+    refresh-period-seconds: ${RATE_LIMIT_REFRESH_SECONDS:60}
+  synthetic:
+    seed-enabled: ${SEED_SYNTHETIC_DATA:true}           # dev profile only
+  security:
+    # Comma-separated allowed origins; do NOT use "*" in production.
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+    jwt:
+      # HS256 secret MUST be >= 32 bytes. Override with a strong value in every real env.
+      secret: ${JWT_SECRET:dev-only-insecure-secret-change-me-0123456789-abcdefghijklmnop}
+      expiration-minutes: ${JWT_EXPIRATION_MINUTES:120}
+      issuer: health-claim-decision-agent
+  mercury:
+    provider: ${MERCURY_PROVIDER:noop}             # noop | openrouter | openai-compatible | inception
+    base-url: ${MERCURY_BASE_URL:}
+    api-key: ${MERCURY_API_KEY:}
+    model: ${MERCURY_MODEL:}
+    timeout-ms: ${AI_TIMEOUT_MS:30000}
+    max-retries: ${AI_MAX_RETRIES:2}
+    retry-backoff-ms: ${AI_RETRY_BACKOFF_MS:300}
+    prompt-version: ${AI_PROMPT_VERSION:v1}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      mercury:
+        register-health-indicator: false
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{36} - %msg%n"

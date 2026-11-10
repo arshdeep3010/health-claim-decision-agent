@@ -1,0 +1,327 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Health Claim Decision Agent - public demo on AWS. Spring Boot on Lambda (container
+  image + Lambda Web Adapter, Function URL with response streaming for the live SSE
+  stage stream), React UI on S3 + CloudFront (which also routes /api and /actuator to
+  the Lambda, so the site is one origin), document storage on S3, and a GitHub Actions
+  deploy role assumed through OIDC (no stored AWS keys). Postgres + pgvector is
+  external (Neon). SYNTHETIC DATA ONLY.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI for the backend (Dockerfile.lambda), e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com/health-claim-decision-agent:<tag>
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: JDBC URL, e.g. jdbc:postgresql://<host>/<db>?sslmode=require
+  DatabaseUsername:
+    Type: String
+    NoEcho: true
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+  MercuryApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+  EmbeddingApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+  OperatorPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Password of the private 'operator' admin that may change shared demo data.
+  GitHubRepo:
+    Type: String
+    Default: arshdeep3010/health-claim-decision-agent
+  GitHubOidcProviderArn:
+    Type: String
+    Description: ARN of the existing token.actions.githubusercontent.com OIDC provider.
+  EcrRepositoryName:
+    Type: String
+    Default: health-claim-decision-agent
+
+Resources:
+  # ---------- Storage ----------
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ---------- Backend ----------
+  ApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: documents-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub "${DocumentsBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DocumentsBucket.Arn
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-api"
+      RetentionInDays: 14
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ApiLogGroup
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-api"
+      Description: Health Claim Decision Agent API (Spring Boot via Lambda Web Adapter)
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      Role: !GetAtt ApiFunctionRole.Arn
+      Architectures: [x86_64]
+      MemorySize: 2048          # also buys CPU, which matters for JVM start-up
+      Timeout: 120
+      Environment:
+        Variables:
+          SPRING_PROFILES_ACTIVE: prod,demo
+          DATABASE_URL: !Ref DatabaseUrl
+          DATABASE_USERNAME: !Ref DatabaseUsername
+          DATABASE_PASSWORD: !Ref DatabasePassword
+          SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "2"
+          JWT_SECRET: !Ref JwtSecret
+          SEED_OPERATOR_PASSWORD: !Ref OperatorPassword
+          STORAGE_PROVIDER: s3
+          S3_BUCKET: !Ref DocumentsBucket
+          S3_REGION: !Ref AWS::Region
+          MERCURY_PROVIDER: openrouter
+          MERCURY_BASE_URL: https://openrouter.ai/api/v1
+          MERCURY_MODEL: inception/mercury-2.5
+          MERCURY_API_KEY: !Ref MercuryApiKey
+          EMBEDDING_PROVIDER: openai-compatible
+          EMBEDDING_BASE_URL: https://integrate.api.nvidia.com/v1
+          EMBEDDING_MODEL: nvidia/nemotron-3.5-embed-1b
+          EMBEDDING_API_KEY: !Ref EmbeddingApiKey
+          EMBEDDING_DIM: "384"
+          EMBEDDING_QUERY_INPUT_TYPE: query
+          EMBEDDING_PASSAGE_INPUT_TYPE: passage
+          EMBEDDING_REQUEST_DIMENSIONS: "true"
+          EMBEDDING_TRUNCATE: END
+          EMBEDDING_BATCH_SIZE: "1"
+          RATE_LIMIT_PER_PERIOD: "5"
+          # Lambda Web Adapter: stream the response, so SSE events reach the browser live.
+          AWS_LWA_INVOKE_MODE: response_stream
+          AWS_LWA_PORT: "8080"
+          AWS_LWA_READINESS_CHECK_PATH: /actuator/health/liveness
+          # Faster JVM start-up on Lambda (C1 only), at a small cost in peak throughput.
+          JAVA_OPTS: -XX:MaxRAMPercentage=75.0 -XX:TieredStopAtLevel=1 -XX:+UseSerialGC
+
+  ApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: NONE            # the app authenticates every API call with its own JWT
+      InvokeMode: RESPONSE_STREAM
+
+  ApiFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ApiFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ---------- CDN: one origin for the UI and the API ----------
+  SiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-site"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Forward everything the API needs (Authorization, Content-Type, Accept, Idempotency-Key,
+  # X-Correlation-Id) but not Host (the Function URL needs its own) or Origin (through
+  # CloudFront the UI and API are one origin; forwarding it would trip Spring's CORS check).
+  ApiOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub "${AWS::StackName}-api"
+        HeadersConfig:
+          HeaderBehavior: allExcept
+          Headers: [host, origin]
+        CookiesConfig: { CookieBehavior: none }
+        QueryStringsConfig: { QueryStringBehavior: all }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Health Claim Decision Agent demo
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: api
+            DomainName: !Select [2, !Split ["/", !GetAtt ApiFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # Managed-CachingOptimized
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: false        # keep the event stream unbuffered
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+          - PathPattern: /actuator/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+          - PathPattern: /v3/api-docs*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+          - PathPattern: /swagger-ui*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  # ---------- CI/CD: GitHub Actions deploy role (OIDC, main branch only) ----------
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-github-deploy"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubRepo}:ref:refs/heads/main"
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${EcrRepositoryName}"
+              - Effect: Allow
+                Action: [lambda:UpdateFunctionCode, lambda:GetFunction, lambda:GetFunctionConfiguration]
+                Resource: !GetAtt ApiFunction.Arn
+              - Effect: Allow
+                Action: [s3:PutObject, s3:DeleteObject, s3:GetObject]
+                Resource: !Sub "${SiteBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt SiteBucket.Arn
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+Outputs:
+  SiteUrl:
+    Value: !Sub "https://${Distribution.DomainName}"
+  FunctionUrl:
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  FunctionName:
+    Value: !Ref ApiFunction
+  SiteBucketName:
+    Value: !Ref SiteBucket
+  DistributionId:
+    Value: !Ref Distribution
+  GitHubDeployRoleArn:
+    Value: !GetAtt GitHubDeployRole.Arn

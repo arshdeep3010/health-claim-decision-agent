@@ -1,0 +1,22 @@
+# Public demo profile, layered on prod: SPRING_PROFILES_ACTIVE=prod,demo
+#
+# Seeds the synthetic policies, claims and the one-click demo accounts (admin,
+# reviewer, user), keeps Swagger open for reading the API, rate-limits the AI
+# endpoints tightly because the sign-in accounts are public, and makes shared data
+# read-only for everyone except the operator account (see DemoWriteGuard).
+# SYNTHETIC DATA ONLY.
+
+app:
+  synthetic:
+    seed-enabled: true
+  ratelimit:
+    limit-for-period: ${RATE_LIMIT_PER_PERIOD:5}
+    refresh-period-seconds: ${RATE_LIMIT_REFRESH_SECONDS:60}
+  demo:
+    write-allowed-users: ${DEMO_WRITE_ALLOWED_USERS:operator}
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}

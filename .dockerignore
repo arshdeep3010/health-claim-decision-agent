@@ -1,0 +1,18 @@
+# Keep the Docker build context small and free of secrets/artifacts.
+target/
+**/target/
+.git/
+.gitignore
+.github/
+.idea/
+.vscode/
+*.iml
+.mvn/wrapper/maven-wrapper.jar
+.env
+.env.*
+!.env.example
+data/
+logs/
+*.log
+Dockerfile
+.dockerignore
