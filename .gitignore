@@ -4,7 +4,7 @@ build/
 *.class
 
 # --- Local document storage (dev) ---
-data/
+/data/
 
 # --- Secrets / local env (NEVER commit) ---
 .env

@@ -115,7 +115,7 @@ Resources:
         ImageUri: !Ref ImageUri
       Role: !GetAtt ApiFunctionRole.Arn
       Architectures: [x86_64]
-      MemorySize: 2048          # also buys CPU, which matters for JVM start-up
+      MemorySize: 3008          # Lambda allots CPU by memory; more CPU shortens the JVM cold start
       Timeout: 120
       Environment:
         Variables:
@@ -147,7 +147,10 @@ Resources:
           # Lambda Web Adapter: stream the response, so SSE events reach the browser live.
           AWS_LWA_INVOKE_MODE: response_stream
           AWS_LWA_PORT: "8080"
-          AWS_LWA_READINESS_CHECK_PATH: /actuator/health/liveness
+          # Readiness, not liveness: Spring serves HTTP before its startup runners (demo seeding)
+          # finish, and Lambda freezes the sandbox between requests. Waiting for readiness keeps
+          # the whole start-up inside the init phase.
+          AWS_LWA_READINESS_CHECK_PATH: /actuator/health/readiness
           # Faster JVM start-up on Lambda (C1 only), at a small cost in peak throughput.
           JAVA_OPTS: -XX:MaxRAMPercentage=75.0 -XX:TieredStopAtLevel=1 -XX:+UseSerialGC
 

@@ -35,9 +35,11 @@ COPY --from=build --chown=app:app /build/app.jar /app/app.jar
 USER app
 EXPOSE 8080
 
-# Lambda Web Adapter: app port + readiness path (does not depend on AI providers).
+# Lambda Web Adapter: app port + readiness path. Readiness (not liveness) turns UP only
+# after Spring's startup runners finish, so Lambda never freezes the app mid-start-up.
+# It does not depend on the AI providers.
 ENV AWS_LWA_PORT=8080 \
-    AWS_LWA_READINESS_CHECK_PATH=/actuator/health/liveness \
+    AWS_LWA_READINESS_CHECK_PATH=/actuator/health/readiness \
     JAVA_OPTS="-XX:MaxRAMPercentage=75.0"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

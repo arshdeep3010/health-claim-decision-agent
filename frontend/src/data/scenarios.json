@@ -1,0 +1,122 @@
+{
+ "CLM-SYN-001": {
+  "scenario": "Covered inpatient surgery",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-002": {
+  "scenario": "Covered emergency surgery",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-003": {
+  "scenario": "Covered hernia repair",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-004": {
+  "scenario": "Covered senior cataract surgery",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-005": {
+  "scenario": "Covered urology procedure",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-006": {
+  "scenario": "Covered after waiting period",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-007": {
+  "scenario": "Covered medical admission",
+  "expected": "APPROVE"
+ },
+ "CLM-SYN-008": {
+  "scenario": "Policy expired",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-009": {
+  "scenario": "Excluded cosmetic procedure",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-010": {
+  "scenario": "Excluded infertility treatment",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-011": {
+  "scenario": "Within initial waiting period",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-012": {
+  "scenario": "Pre-existing condition within waiting period",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-013": {
+  "scenario": "Excluded experimental treatment",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-014": {
+  "scenario": "Excluded dental procedure",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-015": {
+  "scenario": "Claim after policy expiry",
+  "expected": "REJECT"
+ },
+ "CLM-SYN-016": {
+  "scenario": "Pre-existing status unknown",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-017": {
+  "scenario": "Claim exceeds coverage limit",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-018": {
+  "scenario": "Exceeds senior coverage limit",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-019": {
+  "scenario": "Missing diagnosis",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-020": {
+  "scenario": "Missing procedure",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-021": {
+  "scenario": "Conflicting claim amount",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-022": {
+  "scenario": "Pre-existing status unknown (senior)",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-023": {
+  "scenario": "Pre-existing status unknown (post-waiting)",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-024": {
+  "scenario": "Conflicting diagnosis",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-025": {
+  "scenario": "Missing diagnosis and procedure",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-026": {
+  "scenario": "Over limit and pre-existing unknown",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-027": {
+  "scenario": "Pre-existing status unknown",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-028": {
+  "scenario": "Ambiguous pre-existing declaration",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-029": {
+  "scenario": "Pre-existing status unknown (post-waiting)",
+  "expected": "HUMAN_REVIEW"
+ },
+ "CLM-SYN-030": {
+  "scenario": "Pre-existing status unknown",
+  "expected": "HUMAN_REVIEW"
+ }
+}

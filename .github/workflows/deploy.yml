@@ -74,7 +74,7 @@ jobs:
       - name: Smoke test the API (allows for a cold start)
         run: |
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$SITE_URL/actuator/health/liveness" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$SITE_URL/actuator/health/readiness" || true)
             echo "attempt $i: HTTP $code"
             [ "$code" = "200" ] && exit 0
             sleep 10
