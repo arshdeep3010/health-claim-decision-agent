@@ -7,11 +7,19 @@ import com.healthclaim.ai.llm.ChatRequest;
 import com.healthclaim.ai.llm.ChatResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Generates a human-readable explanation of a finalized decision (§18). It uses
@@ -52,27 +60,61 @@ public class ExplanationService {
         }
     }
 
+    /**
+     * Runs the LLM call so it can be abandoned at the deadline. A socket read timeout is
+     * not enough: OpenRouter keeps slow requests alive with whitespace, which resets it.
+     */
+    private static final ExecutorService LLM_CALLS = Executors.newFixedThreadPool(4, r -> {
+        Thread t = new Thread(r, "explanation-llm");
+        t.setDaemon(true);
+        return t;
+    });
+
     private final ChatLlmProvider chatProvider;
     private final TemplateExplanationRenderer template;
     private final ObjectMapper objectMapper;
+    private final long deadlineMs;
 
     public ExplanationService(ChatLlmProvider chatProvider,
                               TemplateExplanationRenderer template,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              @Value("${app.explanation.deadline-ms:40000}") long deadlineMs) {
         this.chatProvider = chatProvider;
         this.template = template;
         this.objectMapper = objectMapper;
+        this.deadlineMs = deadlineMs;
     }
 
     public Explanation generate(ExplanationInput input) {
         if (chatProvider.isConfigured()) {
+            CompletableFuture<ChatResponse> call = null;
             try {
-                ChatResponse response = chatProvider.chat(request(input));
+                ChatRequest request = request(input);
+                Map<String, String> mdc = MDC.getCopyOfContextMap();
+                call = CompletableFuture.supplyAsync(() -> {
+                    if (mdc != null) {
+                        MDC.setContextMap(mdc); // keep the trace id on the worker's log lines
+                    }
+                    try {
+                        return chatProvider.chat(request);
+                    } finally {
+                        MDC.clear();
+                    }
+                }, LLM_CALLS);
+                ChatResponse response = call.get(deadlineMs, TimeUnit.MILLISECONDS);
                 String content = response.content();
                 if (content != null && !content.isBlank()) {
                     return Explanation.llm(content.strip(), response.model());
                 }
                 log.warn("LLM explanation was empty; using template fallback");
+            } catch (TimeoutException e) {
+                call.cancel(true);
+                log.warn("LLM explanation took longer than {} ms; using template fallback", deadlineMs);
+            } catch (ExecutionException e) {
+                log.warn("LLM explanation failed; using template fallback: {}", e.getCause().getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("LLM explanation interrupted; using template fallback");
             } catch (Exception e) {
                 log.warn("LLM explanation failed; using template fallback: {}", e.getMessage());
             }

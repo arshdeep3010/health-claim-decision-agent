@@ -101,6 +101,10 @@ app:
   # Which engine judges a claim once the rules allow it: "llm" (chat model + JSON schema,
   # app.mercury.* settings) or "decision-model" (Parallel Decisions via OpenRouter's
   # Decisions API; returns a probability per outcome). The key defaults to the chat key.
+  explanation:
+    # Overall limit for the LLM explanation, then the template is used. Stays inside
+    # CloudFront's 60 s origin timeout (a read timeout alone never fires: see ExplanationService).
+    deadline-ms: ${EXPLANATION_DEADLINE_MS:40000}
   decision-model:
     engine: ${DECISION_ENGINE:llm}
     base-url: ${DECISION_MODEL_BASE_URL:https://openrouter.ai/api}
