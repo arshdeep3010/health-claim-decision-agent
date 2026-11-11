@@ -52,7 +52,8 @@ class ExplanationIntegrationTest {
         mvc.perform(post("/api/v1/claims/{id}/explain", claimId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.decision", is("HUMAN_REVIEW")))
-                .andExpect(jsonPath("$.explanation", containsString("Decision: HUMAN_REVIEW")));
+                .andExpect(jsonPath("$.explanation", containsString("**Needs review.**")))
+                .andExpect(jsonPath("$.source", is("template")));
 
         // Decision itself is unchanged; explanation is now attached.
         mvc.perform(get("/api/v1/claims/{id}/decision", claimId))
@@ -71,7 +72,9 @@ class ExplanationIntegrationTest {
 
         mvc.perform(post("/api/v1/claims/{id}/explain", claimId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.explanation", is("The claim needs human review due to missing information.")));
+                .andExpect(jsonPath("$.explanation", is("The claim needs human review due to missing information.")))
+                .andExpect(jsonPath("$.source", is("llm")))
+                .andExpect(jsonPath("$.model", is("mock-model")));
 
         mvc.perform(get("/api/v1/claims/{id}/decision", claimId))
                 .andExpect(jsonPath("$.decision", is("HUMAN_REVIEW"))); // unchanged by explanation

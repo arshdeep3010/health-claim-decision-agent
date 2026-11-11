@@ -34,8 +34,9 @@ public class ExplanationController {
     @Operation(summary = "Generate a human-readable explanation for the claim's decision")
     public ExplanationResponse explain(@PathVariable UUID claimId) {
         ExplanationInput input = store.loadInput(claimId);     // short read tx (throws if not analyzed)
-        String explanation = explanationService.generate(input); // LLM/template, outside tx
-        store.saveExplanation(claimId, explanation);            // short write tx
-        return new ExplanationResponse(claimId, input.decision(), explanation);
+        ExplanationService.Explanation explanation = explanationService.generate(input); // LLM/template, outside tx
+        store.saveExplanation(claimId, explanation.text());                              // short write tx
+        return new ExplanationResponse(claimId, input.decision(), explanation.text(),
+                explanation.source(), explanation.model());
     }
 }

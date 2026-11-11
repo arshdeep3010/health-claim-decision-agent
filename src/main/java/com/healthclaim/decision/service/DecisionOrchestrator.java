@@ -279,7 +279,13 @@ public class DecisionOrchestrator {
                     decisionProvider.providerId(), "unavailable", promptVersion, 0L, evidence);
         }
 
-        List<String> reasons = new ArrayList<>(ai.reasonCodes());
+        // Keep the rules' own results (what passed) and add the AI's codes, so the stored
+        // reasons explain the whole decision, not only the model's verdict.
+        List<String> reasons = new ArrayList<>(context.ruleResults().stream()
+                .filter(r -> r.outcome() != RuleOutcome.NOT_APPLICABLE)
+                .map(RuleResult::code)
+                .toList());
+        ai.reasonCodes().stream().filter(c -> !reasons.contains(c)).forEach(reasons::add);
         List<String> uncertainties = new ArrayList<>(context.uncertainties());
         uncertainties.addAll(ai.uncertainties());
 

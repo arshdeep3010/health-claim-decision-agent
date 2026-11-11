@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { analyzeStream, api, ApiError, type AuditEvent, type Claim, type Decision, type Fact, type Policy, type Review, type Session, type StageEvent } from '../api'
+import { analyzeStream, api, ApiError, type AuditEvent, type Claim, type Decision, type Explanation, type Fact, type Policy, type Review, type Session, type StageEvent } from '../api'
 import { Pipeline } from './Pipeline'
 import { probabilities, probabilityLine, StagePacer } from '../streamStages'
 import { DECISION_COPY, humanize, idlePipeline, type PipelineStatus, type StageId, type StageStatus } from '../pipeline'
@@ -505,24 +505,36 @@ function renderMarkdownLite(text: string) {
 }
 
 function ExplainPanel({ claimId, session, decisionId }: { claimId: string; session: Session; decisionId: string }) {
-  const [text, setText] = useState<string | null>(null)
+  const [result, setResult] = useState<Explanation | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  useEffect(() => { setText(null); setErr(null) }, [decisionId])
+  useEffect(() => { setResult(null); setErr(null) }, [decisionId])
   const go = async () => {
     setBusy(true); setErr(null)
-    try { setText((await api(session).explain(claimId)).explanation) } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+    try { setResult(await api(session).explain(claimId)) } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
+  const byline = !result
+    ? 'Written from the stored decision, its reasons and the policy wording. It can never change the decision.'
+    : result.source === 'llm'
+      ? `Written by ${result.model ?? 'an LLM'} from the stored decision, its reasons and the policy wording. It can never change the decision.`
+      : 'Written from a template, because the free LLM was busy or too slow just now. It uses the same stored decision, reasons and policy wording.'
   return (
-    <Panel title="Plain-English explanation" note="Written by an LLM from the stored decision, its reasons and evidence. It can never change the decision.">
-      {!text && (
-        <button className="btn btn-secondary btn-sm" onClick={go} disabled={busy}>
-          {busy ? <><span className="spinner" /> Writing</> : 'Explain this decision'}
-        </button>
+    <Panel title="Plain-English explanation" note={byline}>
+      {!result && (
+        <>
+          <button className="btn btn-secondary btn-sm" onClick={go} disabled={busy}>
+            {busy ? <><span className="spinner" /> Writing</> : 'Explain this decision'}
+          </button>
+          {busy && (
+            <p className="body-2" style={{ fontSize: 13, margin: '10px 0 0' }}>
+              A free LLM writes this, so it can take about half a minute.
+            </p>
+          )}
+        </>
       )}
       {err && <div className="notice stop" style={{ marginTop: 12 }}>{err}</div>}
       <AnimatePresence>
-        {text && <motion.div className="explanation" {...rise}>{renderMarkdownLite(text)}</motion.div>}
+        {result && <motion.div className="explanation" {...rise}>{renderMarkdownLite(result.explanation)}</motion.div>}
       </AnimatePresence>
     </Panel>
   )

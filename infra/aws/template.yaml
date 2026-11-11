@@ -130,6 +130,9 @@ Resources:
           DATABASE_USERNAME: !Ref DatabaseUsername
           DATABASE_PASSWORD: !Ref DatabasePassword
           SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "2"
+          # Neon closes idle connections when it scales to zero; recycle ours first.
+          SPRING_DATASOURCE_HIKARI_MAX_LIFETIME: "240000"
+          SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT: "120000"
           JWT_SECRET: !Ref JwtSecret
           SEED_OPERATOR_PASSWORD: !Ref OperatorPassword
           STORAGE_PROVIDER: s3
@@ -140,6 +143,10 @@ Resources:
           # Chat model for explanations and fact extraction (OpenAI-compatible client).
           MERCURY_MODEL: "nvidia/nemotron-3.5-super-vl:free"
           MERCURY_API_KEY: !Ref MercuryApiKey
+          # The free chat model queues for ~30 s: one attempt with a 50 s limit, which keeps
+          # /explain inside CloudFront's 60 s origin timeout (retrying a slow queue only adds time).
+          AI_TIMEOUT_MS: "50000"
+          AI_MAX_RETRIES: "0"
           # The AI judge: a decision model via OpenRouter's Decisions API (same key).
           DECISION_ENGINE: decision-model
           DECISION_MODEL: "parallel/decisions-fast:free"

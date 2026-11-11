@@ -91,7 +91,8 @@ public class MercuryChatProvider implements ChatLlmProvider {
         } catch (PermanentAiException e) {
             throw new AiProviderException("AI provider rejected the request: " + e.getMessage(), e);
         } catch (TransientAiException e) {
-            throw new AiProviderException("AI provider unavailable after retries", e);
+            throw new AiProviderException("AI provider unavailable after " + (retries.get() + 1)
+                    + " attempt(s): " + e.getMessage(), e);
         }
     }
 
@@ -115,7 +116,7 @@ public class MercuryChatProvider implements ChatLlmProvider {
             // Connect/read timeout, I/O error, or response-extraction failure ->
             // transient, safe to retry. (Our own Transient/PermanentAiException are
             // not RestClientException subclasses, so they propagate unaffected.)
-            throw new TransientAiException("I/O error calling AI provider", e);
+            throw new TransientAiException("I/O error calling AI provider (" + e.getMessage() + ")", e);
         }
         return parse(json);
     }

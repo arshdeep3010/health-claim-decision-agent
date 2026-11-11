@@ -5,7 +5,6 @@ import com.healthclaim.claim.exception.ClaimNotFoundException;
 import com.healthclaim.claim.repository.ClaimRepository;
 import com.healthclaim.decision.domain.Decision;
 import com.healthclaim.decision.dto.DecisionResponse;
-import com.healthclaim.decision.dto.EvidenceResponse;
 import com.healthclaim.decision.exception.DecisionNotFoundException;
 import com.healthclaim.decision.repository.DecisionEvidenceRepository;
 import com.healthclaim.decision.repository.DecisionRepository;
@@ -48,12 +47,14 @@ public class ExplanationStore {
         DecisionResponse dr = decisionMapper.fromEntity(decision,
                 decisionEvidenceRepository.findByDecisionIdOrderByRankAsc(decision.getId()));
 
-        List<String> evidenceRefs = dr.supportingEvidence().stream()
-                .map(ExplanationStore::ref)
+        List<ExplanationInput.Clause> evidence = dr.supportingEvidence().stream()
+                .filter(e -> e.snippet() != null && !e.snippet().isBlank())
+                .map(e -> new ExplanationInput.Clause(e.pageNumber(), e.section(), e.snippet()))
                 .toList();
-
+        String model = "deterministic".equals(dr.modelProvider()) ? null : dr.model();
         return new ExplanationInput(dr.decision(), dr.reasonCodes(), dr.missingInformation(),
-                dr.uncertainties(), evidenceRefs, claim.getDiagnosis(), claim.getProcedureName());
+                dr.uncertainties(), evidence, claim.getDiagnosis(), claim.getProcedureName(),
+                dr.summary(), dr.confidence(), model);
     }
 
     @Transactional
@@ -70,10 +71,5 @@ public class ExplanationStore {
         return decisionRepository.findByClaimId(claimId)
                 .map(d -> d.getDecision() != null ? d.getDecision().name() : null)
                 .orElseThrow(() -> new DecisionNotFoundException(claimId));
-    }
-
-    private static String ref(EvidenceResponse e) {
-        String section = e.section() != null ? e.section() : "policy";
-        return section + (e.pageNumber() != null ? " (p." + e.pageNumber() + ")" : "");
     }
 }

@@ -32,6 +32,8 @@ export interface PolicyChunk {
   section: string | null; heading: string | null; text: string; tokenCount: number | null
   embeddingModel: string | null; embeddingDimensions: number | null
 }
+/** Who wrote it: the chat LLM (with its model id) or the deterministic template fallback. */
+export interface Explanation { explanation: string; source: 'llm' | 'template'; model: string | null }
 export interface AuditEvent {
   id: string; eventType: string; modelProvider: string | null; modelName: string | null
   promptVersion: string | null; finalDecision: string | null; latencyMs: number | null
@@ -98,7 +100,7 @@ export const api = (s: Session) => ({
   chunks: (policyId: string) => request<PolicyChunk[]>(`/api/v1/policies/${policyId}/chunks`, {}, s.token),
   analyze: (id: string) => request<Decision>(`/api/v1/claims/${id}/analyze`, { method: 'POST' }, s.token),
   decision: (id: string) => request<Decision>(`/api/v1/claims/${id}/decision`, {}, s.token),
-  explain: (id: string) => request<{ explanation: string }>(`/api/v1/claims/${id}/explain`, { method: 'POST' }, s.token),
+  explain: (id: string) => request<Explanation>(`/api/v1/claims/${id}/explain`, { method: 'POST' }, s.token),
   audit: (id: string) => request<AuditEvent[]>(`/api/v1/claims/${id}/audit`, {}, s.token),
   review: (id: string, reviewDecision: string, reason: string) =>
     request<Review>(`/api/v1/claims/${id}/review`, { method: 'POST', body: JSON.stringify({ reviewDecision, reason }) }, s.token),
