@@ -41,6 +41,12 @@ Parameters:
   GitHubRepo:
     Type: String
     Default: arshdeep3010/health-claim-decision-agent
+  GitHubImmutableSubjectPrefix:
+    Type: String
+    Default: "repo:arshdeep3010@188484562/health-claim-decision-agent@1452946782"
+    Description: >
+      GitHub's immutable OIDC subject prefix for this repo (owner and repo IDs). New repos
+      use it by default; read it with: gh api repos/<owner>/<repo>/actions/oidc/customization/sub
   GitHubOidcProviderArn:
     Type: String
     Description: ARN of the existing token.actions.githubusercontent.com OIDC provider.
@@ -287,7 +293,11 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubRepo}:ref:refs/heads/main"
+                # GitHub's immutable subject (owner/repo IDs, so a renamed or re-created repo
+                # cannot take over the role); the name-based form is kept for older settings.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "${GitHubImmutableSubjectPrefix}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubRepo}:ref:refs/heads/main"
       Policies:
         - PolicyName: deploy
           PolicyDocument:
