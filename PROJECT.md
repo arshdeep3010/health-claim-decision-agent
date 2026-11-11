@@ -112,7 +112,7 @@ business logic — and the whole stack runs offline with zero API keys for dev/C
 | Observability | Micrometer + Prometheus, structured JSON logs |
 | Storage | Local FS (dev) / S3-compatible (deploy, AWS SDK v2) |
 | Demo UI | React 19, TypeScript, Vite 6, Motion |
-| Testing | JUnit 5, Mockito, Testcontainers, MockWebServer, MockRestServiceServer, LocalStack, Vitest (**111 backend + 23 frontend tests**) |
+| Testing | JUnit 5, Mockito, Testcontainers, MockWebServer, MockRestServiceServer, LocalStack, Vitest (**122 backend + 23 frontend tests**) |
 | Ship | Maven (`./mvnw`), multi-stage Docker, GitHub Actions, AWS ECR + Lambda |
 
 ---
@@ -259,6 +259,11 @@ In testing it also caught what the text-matching rule cannot: for a rhinoplasty 
 whose exclusion list says "cosmetic surgery", it answered REJECT at 85% from the
 policy wording. That AI-only rejection still goes to a person.
 
+**Whole clauses, not fragments.** Each retrieved chunk goes in whole (~1000
+characters). It used to be cut to 500, which dropped POL-SYN-001's covering clause
+("3.1 Laparoscopic cholecystectomy …", at character ~800); with it, the model's
+confidence on CLM-SYN-001 rose from 64–84% to 97%.
+
 **It can consult the web.** Decision models research the live web; the sources it
 used come back with the answer and are shown in the UI. Because the policy is
 fictional, only the evidence in the state should count, which is one more reason the
@@ -327,7 +332,7 @@ sequenceDiagram
   O-->>UI: stage RULES COMPLETED {outcome, passed, flagged}
   alt rules ALLOW
     O-->>UI: stage AI STARTED {instructions, input: the exact state the model receives}
-    O-->>UI: stage AI COMPLETED {suggestion, confidence, model, summary}
+    O-->>UI: stage AI COMPLETED {suggestion, probabilities, model, sources}
   else rules decided
     O-->>UI: stage AI SKIPPED {reason: RULES_DECIDED}
   end
@@ -587,7 +592,7 @@ App Runner / Cloud Run with no code changes.
 
 ## 16. Testing & evaluation
 
-- **111 backend tests** — unit (rules, extractor normalization, embedders, chunker,
+- **122 backend tests** — unit (rules, extractor normalization, embedders, chunker,
   embedding request shape / retry via MockRestServiceServer), contract (chat client via
   MockWebServer: retry / timeout / circuit breaker), integration (Testcontainers
   pgvector + LocalStack S3: APIs, RAG, re-embed, SSE stage order, evidence surviving
@@ -634,6 +639,9 @@ flowchart LR
 - **What the AI compared:** the claim, the policy terms, the retrieved clauses, the
   facts and rule results the decision model received, its probability for each outcome
   as bars, any web sources it consulted, and Java's ruling, or why it was not called. The raw prompt and JSON are one click away.
+- **Plain-English explanation:** verdict, why (checks and the AI's probabilities), the
+  policy sentence that names the procedure, and what to check. It says who wrote it: the
+  chat model, or the template when the free model is busy or slower than 40 s.
 - **Policy rulebook:** every policy from PostgreSQL with the rule each term feeds, and
   its indexed wording (`GET /policies/{id}/chunks`, embedding model and dimensions).
 - **Roles:** one-click dev accounts for admin, reviewer and user; review and audit
@@ -652,7 +660,7 @@ flowchart LR
 docker compose up --build          # use DB_HOST_PORT=5433 if 5432 is taken
 
 # or run tests
-./mvnw clean verify                # 111 backend tests (needs Docker for Testcontainers)
+./mvnw clean verify                # 122 backend tests (needs Docker for Testcontainers)
 cd frontend && npm test            # 23 frontend tests (Vitest)
 ```
 
@@ -676,6 +684,9 @@ button for the bearer token).
 
 ## 19. Limitations & future work
 
+- Both AI models use OpenRouter's **free tier** (daily request cap; the chat model
+  queues for 30–50 s), so explanations often come from the template. A paid chat model
+  is a one-line configuration change.
 - Authorization is **role-based**; per-row claim ownership (a USER seeing only their
   own claims) is a documented future enhancement.
 - Analysis runs inside the request (plain or streamed); the async job model (`202` +

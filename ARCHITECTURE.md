@@ -204,6 +204,7 @@ POST /claims/{id}/analyze/stream   (same pipeline, progress streamed as SSE, §5
         │
    RETRIEVE  embedQuery(diagnosis + procedure + treatment)   ── input_type=query
              pgvector top-k cosine search (outside tx)       ── fails? → ragFailed
+             each hit keeps its WHOLE chunk (~1000 chars) as evidence
         │
    RULES     RuleEngine.evaluate(DecisionInputs)             ── 7 pure rules
         │    aggregate: REJECT > REVIEW > ALLOW
@@ -221,21 +222,34 @@ POST /claims/{id}/analyze/stream   (same pipeline, progress streamed as SSE, §5
                       │    AI/provider error    → HUMAN_REVIEW (+AI_PROVIDER_FAILURE)
                       ▼
    PERSIST   Decision + DecisionEvidence snapshot, set claim status (short tx)
+             reasons = the rules' results + the AI's codes (+ any guardrail code)
              decision metric + audit record (AI_DECISION, traceId from MDC)
 ```
+
+Evidence used to be the first 500 characters of each chunk. In one policy the clause
+that covers the claim sat at character ~800, so neither the decision model nor the
+explanation saw it; with whole chunks the decision model's confidence on that claim
+rose from 64–84% to 97% (`rag.max-snippet-length`, default 1200).
 
 ### 5.4 Human review & explanation
 
 ```
 POST /claims/{id}/review   (REVIEWER/ADMIN)        POST /claims/{id}/explain
-   reviewer = authenticated principal                load finalized decision (short tx)
-   APPROVE/REJECT → finalize claim status            generate text from decision +
-   REQUEST_INFORMATION → stays in review             reasons + evidence + facts ONLY
-   record agreedWithAi, audit HUMAN_OVERRIDE         (chat LLM if configured, else
-                                                      template; NEVER changes the
-                                                      decision)
+   reviewer = authenticated principal                load finalized decision (short tx):
+   APPROVE/REJECT → finalize claim status              verdict, reasons, AI summary +
+   REQUEST_INFORMATION → stays in review               confidence, clause TEXT
+   record agreedWithAi, audit HUMAN_OVERRIDE         chat LLM, abandoned after 40 s
+                                                     ── fails/late → template renderer
                                                      persist decision.explanation
+                                                     respond {explanation, source: llm|template, model}
 ```
+
+The explanation never changes the decision. Both writers produce the same shape:
+**verdict** and what was claimed; **Why** (the policy checks in plain words, the AI
+judge's probabilities); the **policy wording** it relied on, quoting the sentence that
+names the procedure (matched on its main word and the diagnosis before modifiers such as
+"laparoscopic", which would also match hernia repair); and **Worth checking**. The UI
+says which wrote it.
 
 ### 5.5 Live analysis stream (SSE)
 
@@ -334,6 +348,14 @@ refusals fail safe to `HUMAN_REVIEW`.
 currently `nvidia/nemotron-3.5-super-vl:free`, with strict JSON schemas. Calls allow up
 to 4096 output tokens because reasoning models think before answering; a lower cap
 truncates the JSON (this happened with Mercury 2.5) and fails safe.
+
+On the free tier it waits in a queue: about 30–50 s per explanation, sometimes HTTP 503.
+So on Lambda the chat client makes one attempt (`AI_MAX_RETRIES=0`), and
+`ExplanationService` abandons the call after `app.explanation.deadline-ms` (40 s), which
+keeps `/explain` inside CloudFront's 60 s origin timeout. A socket read timeout alone is
+not enough: OpenRouter keeps slow requests alive by sending whitespace, which resets it.
+Failures log their cause (`HTTP 503`, `Read timed out`). A paid model such as
+`google/gemini-2.5-flash-lite` answers in ~2 s for about $0.00006, by configuration.
 
 **Embeddings.** `EmbeddingProvider` distinguishes `embedQuery` from `embedPassages`
 (defaulting to plain `embed` for symmetric providers). The OpenAI-compatible
@@ -482,7 +504,7 @@ actuator, and requires real secrets. `.env.example` documents every variable.
 
 ## 13. Testing strategy
 
-**111 backend tests + 23 frontend tests**, all offline/CI-safe (no paid APIs):
+**122 backend tests + 23 frontend tests**, all offline/CI-safe (no paid APIs):
 
 - **Unit**: rule engine + aggregation, extractor normalization, decision-model
   request/response mapping (state, choice question, probabilities, sources, refusal,
@@ -500,6 +522,9 @@ actuator, and requires real secrets. `.env.example` documents every variable.
   decide, error event for an unknown claim), the chunks endpoint, evidence surviving
   re-ingestion, the summary being stored, and re-analysis dropping a stale
   explanation. AI is mocked (`@MockitoBean`) or `noop`.
+- **Explanations**: the template's wording and clause quoting (the real POL-SYN-001
+  chunk must quote cholecystectomy, not hernia repair), the LLM prompt's contents, and
+  a hanging chat model being abandoned at the deadline.
 - **Frontend** (Vitest): the SSE parser (events split across network chunks, CRLF,
   error events, a stream that ends without a decision, 401 handling), stage-event to
   display mapping, the stage pacer's timing (fake timers), and formatting helpers.
@@ -544,9 +569,13 @@ Browser ──HTTPS──▶ CloudFront ─── default ──▶ S3 site buck
   once into the Lambda's encrypted environment. GitHub never sees them: the deploy job
   assumes `hcda-github-deploy` through **OIDC**, scoped to this repo's `main` branch and
   allowed only to push the image, update this function, write the site bucket and
-  invalidate this distribution.
+  invalidate this distribution. New GitHub repos send an **ID-based subject**
+  (`repo:<owner>@<id>/<repo>@<id>:ref:refs/heads/main`); the role trusts that form, so a
+  renamed or re-created repo can't assume it, and keeps the name form as a fallback.
 - **Database.** Neon's free tier (outside AWS, same region); the Lambda stays outside a
   VPC, so it reaches OpenRouter and NVIDIA without a NAT gateway (~$32/month saved).
+  Neon closes idle connections when it scales to zero, so Hikari recycles its (pool 2)
+  after 4 minutes.
 - **Same image elsewhere.** `Dockerfile` runs unchanged on ECS Fargate / App Runner /
   Cloud Run. An RDS-based runbook and its trade-offs: [`docs/deploy-aws.md`](docs/deploy-aws.md).
 
@@ -590,6 +619,9 @@ design language, built to show the pipeline to a reviewer:
   they rank clauses well but are not strong matches in absolute terms.
 - NVIDIA's free endpoint is used with one input per request because multi-input
   batches fail intermittently; a paid/self-hosted NIM can raise `EMBEDDING_BATCH_SIZE`.
+- Both AI models run on OpenRouter's **free tier**, which has a daily request cap and a
+  slow queue for the chat model: explanations often come from the template. Claims
+  still decide in ~1 s, and an over-limit decision model fails safe to human review.
 - The default local embedder is **lexical, not semantic** — it exists so dev/CI run
   with no keys; real retrieval quality comes from the hosted embedding provider.
 
