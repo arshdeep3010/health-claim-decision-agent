@@ -94,7 +94,8 @@ app:
     batch-size: ${EMBEDDING_BATCH_SIZE:32}
   rag:
     top-k: ${RAG_TOP_K:5}
-    max-snippet-length: ${RAG_MAX_SNIPPET_LENGTH:500}
+    # Whole chunks (~1000 chars): a 500-char cut dropped the clause the decision needed.
+    max-snippet-length: ${RAG_MAX_SNIPPET_LENGTH:1200}
   decision:
     min-confidence: ${DECISION_MIN_CONFIDENCE:0.5}
     evidence-top-k: ${DECISION_EVIDENCE_TOP_K:5}

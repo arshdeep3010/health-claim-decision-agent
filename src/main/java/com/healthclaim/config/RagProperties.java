@@ -9,6 +9,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties("app.rag")
 public record RagProperties(
         @DefaultValue("5") int topK,
-        @DefaultValue("500") int maxSnippetLength
+        @DefaultValue("1200") int maxSnippetLength
 ) {
 }

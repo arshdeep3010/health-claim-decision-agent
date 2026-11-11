@@ -67,16 +67,43 @@ class TemplateExplanationRendererTest {
                 + "3.3 Cholecystectomy: removal of the gall bladder is covered as an inpatient procedure.";
         assertThat(TemplateExplanationRenderer.excerpt(chunk, List.of("cholecystectomy", "gallstones")))
                 .isEqualTo("3.3 Cholecystectomy: removal of the gall bladder is covered as an inpatient procedure.");
-        // Nothing about the claim: the first sentence that starts cleanly.
-        assertThat(TemplateExplanationRenderer.excerpt(chunk, List.of("rhinoplasty")))
-                .startsWith("3.2 Appendectomy");
+        // Nothing about the claim: nothing is quoted (no unrelated header or neighbour clause).
+        assertThat(TemplateExplanationRenderer.excerpt(chunk, List.of("rhinoplasty"))).isNull();
+    }
+
+    @Test
+    void quotesTheProceduresOwnClauseNotOneThatSharesAModifier() {
+        // Real text of POL-SYN-001's first chunk: the covered list is one long sentence.
+        String chunk = "SYNTHETIC POLICY WORDING - POL-SYN-001 Plan type: Individual. Section 3 - Covered Procedures "
+                + "The policy covers medically necessary inpatient procedures, including: 3.1 Laparoscopic "
+                + "cholecystectomy: removal of the gallbladder for gallstones or cholecystitis. 3.2 Appendectomy: "
+                + "surgical removal of the appendix for acute appendicitis. 3.3 Hernia repair: open or laparoscopic "
+                + "repair of inguinal and umbilical hernia.";
+        ExplanationInput input = new ExplanationInput("APPROVE", List.of("POLICY_ACTIVE"), List.of(), List.of(),
+                List.of(new ExplanationInput.Clause(1, "SYNTHETIC POLICY WORDING - POL-SYN-001", chunk)),
+                "Gallstones", "Laparoscopic Cholecystectomy", null, null, null);
+
+        String text = renderer.render(input);
+
+        assertThat(text).contains("Page 1: \"3.1 Laparoscopic cholecystectomy: removal of the gallbladder for "
+                + "gallstones or cholecystitis.\"");
+        assertThat(text).doesNotContain("Hernia").doesNotContain("Plan type");
+    }
+
+    @Test
+    void saysSoWhenTheWordingDoesNotNameTheProcedure() {
+        ExplanationInput input = new ExplanationInput("HUMAN_REVIEW", List.of(), List.of(), List.of(),
+                List.of(new ExplanationInput.Clause(1, null, "3.2 Appendectomy: removal of the appendix is covered.")),
+                "Chronic sinusitis", "Balloon sinuplasty", null, null, null);
+
+        assertThat(renderer.render(input)).contains("The retrieved clauses do not name this procedure or diagnosis.");
     }
 
     @Test
     void longClausesAreTrimmedAtAWord() {
         String longText = "word ".repeat(80).strip();
         ExplanationInput input = new ExplanationInput("APPROVE", List.of(), List.of(), List.of(),
-                List.of(new ExplanationInput.Clause(2, null, longText)), null, "X", null, null, null);
+                List.of(new ExplanationInput.Clause(2, null, longText)), null, "Word", null, null, null);
 
         String quoted = renderer.render(input).lines().filter(l -> l.startsWith("- Page 2:")).findFirst().orElseThrow();
         assertThat(quoted).endsWith("…\"").hasSizeLessThan(240);

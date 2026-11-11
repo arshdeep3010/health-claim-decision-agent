@@ -44,18 +44,18 @@ public class TemplateExplanationRenderer {
             sb.append('\n');
         }
 
-        List<String> terms = terms(in);
-        List<String> quotes = new ArrayList<>();
-        for (ExplanationInput.Clause c : distinctClauses(in.evidence())) {
-            String excerpt = excerpt(c.text(), terms);
-            if (excerpt != null && quotes.stream().noneMatch(q -> q.contains(excerpt))) {
-                quotes.add((c.page() != null ? "Page " + c.page() + ": " : "") + '"' + excerpt + '"');
-            }
+        // Quote what the policy says about this claim: first by the procedure's main word or
+        // the diagnosis, and only then by modifiers ("laparoscopic" also matches hernia repair).
+        List<String> quotes = quotes(in.evidence(), primaryTerms(in));
+        if (quotes.isEmpty()) {
+            quotes = quotes(in.evidence(), secondaryTerms(in));
         }
         if (!quotes.isEmpty()) {
             sb.append("**Policy wording it relied on**\n");
             quotes.forEach(q -> sb.append("- ").append(q).append('\n'));
             sb.append('\n');
+        } else if (in.evidence() != null && !in.evidence().isEmpty()) {
+            sb.append("**Policy wording**\n- The retrieved clauses do not name this procedure or diagnosis.\n\n");
         }
 
         List<String> check = new ArrayList<>();
@@ -118,14 +118,27 @@ public class TemplateExplanationRenderer {
         return out;
     }
 
-    /** Words from the claim (4+ letters) used to find the sentences that are about it. */
-    private static List<String> terms(ExplanationInput in) {
+    /** The procedure's main word (its last word) and the diagnosis words: what the claim is about. */
+    static List<String> primaryTerms(ExplanationInput in) {
         List<String> out = new ArrayList<>();
-        for (String s : new String[] {in.procedureName(), in.diagnosis()}) {
-            if (s == null) {
-                continue;
-            }
-            for (String w : s.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+        List<String> procedure = words(in.procedureName());
+        if (!procedure.isEmpty()) {
+            out.add(procedure.get(procedure.size() - 1));
+        }
+        words(in.diagnosis()).stream().filter(w -> !out.contains(w)).forEach(out::add);
+        return out;
+    }
+
+    /** The procedure's other words (often modifiers such as "laparoscopic"). */
+    static List<String> secondaryTerms(ExplanationInput in) {
+        List<String> procedure = words(in.procedureName());
+        return procedure.isEmpty() ? List.of() : procedure.subList(0, procedure.size() - 1);
+    }
+
+    private static List<String> words(String text) {
+        List<String> out = new ArrayList<>();
+        if (text != null) {
+            for (String w : text.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
                 if (w.length() >= 4 && !out.contains(w)) {
                     out.add(w);
                 }
@@ -134,40 +147,39 @@ public class TemplateExplanationRenderer {
         return out;
     }
 
-    /**
-     * The sentence(s) of a chunk that mention the claim, or else its first complete
-     * sentence. Chunks are cut at fixed sizes, so a leading fragment is skipped.
-     */
-    static String excerpt(String text, List<String> terms) {
-        if (text == null || text.isBlank()) {
-            return null;
+    private static List<String> quotes(List<ExplanationInput.Clause> clauses, List<String> terms) {
+        List<String> quotes = new ArrayList<>();
+        if (terms.isEmpty()) {
+            return quotes;
         }
-        List<String> sentences = new ArrayList<>();
-        for (String s : text.replaceAll("\\s+", " ").strip().split("(?<=[.!?])\\s+(?=[A-Z0-9])")) {
-            if (!s.isBlank()) {
-                sentences.add(s.strip());
+        for (ExplanationInput.Clause c : distinctClauses(clauses)) {
+            String excerpt = excerpt(c.text(), terms);
+            if (excerpt != null && quotes.stream().noneMatch(q -> q.contains(excerpt))) {
+                quotes.add((c.page() != null ? "Page " + c.page() + ": " : "") + '"' + excerpt + '"');
             }
         }
-        if (sentences.isEmpty()) {
+        return quotes;
+    }
+
+    /**
+     * The sentence(s) of a policy chunk that mention one of the terms, or null. Splits at
+     * sentence ends and before numbered clauses ("3.1 ..."), since policy wording lists
+     * clauses inside one long sentence.
+     */
+    static String excerpt(String text, List<String> terms) {
+        if (text == null || text.isBlank() || terms.isEmpty()) {
             return null;
         }
         List<String> matching = new ArrayList<>();
-        for (String s : sentences) {
-            String lower = s.toLowerCase(Locale.ROOT);
-            if (terms.stream().anyMatch(lower::contains)) {
-                matching.add(s);
+        String flat = text.replaceAll("\\s+", " ").strip();
+        for (String s : flat.split("(?<=[.!?])\\s+(?=[A-Z0-9])|\\s+(?=\\d+\\.\\d+\\s+\\p{L})")) {
+            String sentence = s.strip();
+            String lower = sentence.toLowerCase(Locale.ROOT);
+            if (!sentence.isEmpty() && terms.stream().anyMatch(lower::contains)) {
+                matching.add(sentence);
             }
         }
-        if (!matching.isEmpty()) {
-            return trim(String.join(" ", matching.subList(0, Math.min(2, matching.size()))));
-        }
-        // No mention of the claim: the first sentence that starts cleanly (not a cut-off fragment).
-        for (String s : sentences) {
-            if (Character.isUpperCase(s.charAt(0)) || Character.isDigit(s.charAt(0))) {
-                return trim(s);
-            }
-        }
-        return trim(sentences.get(0));
+        return matching.isEmpty() ? null : trim(String.join(" ", matching.subList(0, Math.min(2, matching.size()))));
     }
 
     private static String trim(String text) {

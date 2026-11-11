@@ -330,7 +330,7 @@ function EvidencePanel({ decision }: { decision: Decision }) {
               {(e.similarity ?? 0).toFixed(2)}
             </span>
           </div>
-          <p className="snippet">{e.snippet}</p>
+          <Snippet text={e.snippet} />
         </div>
       ))}
       {ev.length > 0 && (
@@ -597,5 +597,21 @@ function AuditPanel({ events }: { events: AuditEvent[] }) {
         ))}
       </ul>
     </Panel>
+  )
+}
+
+/** Evidence is a whole policy chunk (~1000 chars): show a few lines, expandable. */
+function Snippet({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > 320
+  return (
+    <>
+      <p className={`snippet${long && !open ? ' clamp' : ''}`}>{text}</p>
+      {long && (
+        <button className="link-btn" style={{ fontSize: 13, marginTop: 4 }} onClick={() => setOpen(o => !o)} aria-expanded={open}>
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      )}
+    </>
   )
 }

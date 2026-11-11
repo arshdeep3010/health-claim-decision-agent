@@ -389,3 +389,6 @@ textarea.input:focus { outline: none; box-shadow: 0 0 0 4px var(--accent-soft), 
 .sources summary { cursor: pointer; color: var(--accent); }
 .sources ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .sources a { color: var(--accent); overflow-wrap: anywhere; }
+
+/* Whole-chunk evidence: clamp to a few lines until expanded */
+.snippet.clamp { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
