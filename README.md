@@ -8,8 +8,8 @@
 An AI-assisted health-insurance **claim decision-support** backend. It ingests a
 synthetic claim, retrieves relevant policy clauses via **RAG** (PostgreSQL +
 pgvector), extracts structured claim facts, applies **deterministic business
-rules**, consults a **decision model** (Parallel Decisions, via OpenRouter) that returns a
-probability for each outcome, and produces an auditable:
+rules**, consults an **AI judge** (Nemotron 3.5 Bolt on NVIDIA NIM, free, ~2 s, strict JSON),
+and produces an auditable:
 
 ```
 APPROVE   |   REJECT   |   HUMAN_REVIEW
@@ -34,8 +34,8 @@ demo sign-in; the first request after it has been idle takes ~30 s while the JVM
 | Framework | Spring Boot 3.5.x (Web, Validation, Actuator; JPA/Security added by phase) |
 | Database | PostgreSQL + pgvector |
 | Migrations | Flyway |
-| AI judge (decision assist) | **Parallel Decisions Fast** decision model via OpenRouter's Decisions API: typed `choice` answer with per-outcome probabilities (`DecisionProvider`, swappable) |
-| AI (extraction/explanation) | `nvidia/nemotron-3.5-super-vl` via OpenRouter (OpenAI-compatible chat, strict JSON schema) |
+| AI judge (decision assist) | `nvidia/nemotron-3.5-bolt-e4b` on **NVIDIA NIM** (free, same key as the embeddings): strict JSON schema, ~1–2 s. Swappable `DecisionProvider`; the **Parallel Decisions** decision model (per-outcome probabilities, paid $0.001) is one setting away |
+| AI (extraction/explanation) | the same Nemotron 3.5 Bolt model (OpenAI-compatible chat), explanations in ~2 s |
 | Embeddings | Pluggable `EmbeddingProvider`: NVIDIA NIM `nemotron-3.5-embed-1b` (OpenAI-compatible, asymmetric query/passage, shortened to 384-d), or a local deterministic fallback for dev/CI |
 | Docs | OpenAPI / Swagger UI (springdoc) |
 | Build | Maven (via committed `./mvnw` wrapper) |
@@ -46,9 +46,7 @@ demo sign-in; the first request after it has been idle takes ~30 s while the JVM
 Research of the live Inception/OpenRouter docs established two facts that shape the design:
 
 1. Model ids are **configuration, never hardcoded** (`DECISION_MODEL`, `MERCURY_MODEL`).
-   That paid off: the project started on Inception's Mercury 2.5, OpenRouter retired it
-   in November 2026, and switching the judge to a decision model and the chat client to
-   Nemotron needed no change to business logic.
+   That paid off: the judge has changed twice, by configuration only: Inception's Mercury 2.5 (LLM, retired by OpenRouter in November 2026), then the Parallel Decisions decision model (its free tier was withdrawn days later), then Nemotron 3.5 Bolt on NVIDIA NIM. None of these needed a change to business logic.
 2. **OpenRouter exposes no first-party embeddings endpoint**, so
    embeddings come from a separate, swappable `EmbeddingProvider` — NVIDIA NIM
    (`nvidia/nemotron-3.5-embed-1b`) in the configured setup.
@@ -85,6 +83,7 @@ This project is built incrementally. Each phase compiles and tests before the ne
 - [x] **Phase 20** — Decision model as the AI judge (Parallel Decisions: per-outcome probabilities in ~1–2 s, web sources shown)
 - [x] **Phase 21** — Live on AWS: Lambda (container + Web Adapter, streaming Function URL), CloudFront + S3, Neon Postgres, GitHub Actions deploy via OIDC
 - [x] **Phase 22** — Explanations that explain: rule reasons kept, whole-chunk evidence, quoted policy wording, honest "who wrote it", 40 s deadline
+- [x] **Phase 23** — Free AI judge after the decision model's free tier was withdrawn: Nemotron 3.5 Bolt on NVIDIA NIM (~2 s judge and explanations)
 
 ---
 
@@ -202,8 +201,7 @@ Browser ──HTTPS──▶ CloudFront ──▶ S3                 (React UI)
                                                        + AWS Lambda Web Adapter
                                                          ├─▶ Neon Postgres + pgvector
                                                          ├─▶ S3 (policy documents)
-                                                         └─▶ OpenRouter (decision model, chat)
-                                                             NVIDIA NIM (embeddings)
+                                                         └─▶ NVIDIA NIM (AI judge, explanations, embeddings)
 ```
 
 - **Infrastructure as code:** [`infra/aws/template.yaml`](infra/aws/template.yaml)
@@ -221,8 +219,9 @@ Browser ──HTTPS──▶ CloudFront ──▶ S3                 (React UI)
   everyone except a private operator account (`DemoWriteGuard`).
 - **Start-up:** the Web Adapter waits for Spring's **readiness** (not liveness), so the
   app is never frozen mid-start-up; a cold start takes ~30 s on 3 GB.
-- **Free AI tier:** the decision model answers in ~1 s; the free chat model often takes
-  30–50 s, so explanations fall back to a template after 40 s (and say so).
+- **Free AI:** the judge and explanations run on NVIDIA NIM's free tier (~1–2 s each).
+  If a call fails or an explanation passes 40 s, the claim goes to human review or the
+  explanation comes from a template, and the UI says so.
 
 The same image runs on ECS Fargate / App Runner / Cloud Run unchanged. Runbook and
 trade-offs for an RDS-based setup: [docs/deploy-aws.md](docs/deploy-aws.md).

@@ -16,7 +16,7 @@ A synthetic health-insurance **claim** is submitted. The system extracts structu
 **facts** from it with an LLM (schema-constrained, validated), retrieves the most
 relevant **policy clauses** from ingested policy documents via **RAG** (PostgreSQL +
 pgvector, NVIDIA NIM embeddings), runs **deterministic business rules**, and — only
-when the rules raise no hard objection — asks a **decision model** (Parallel Decisions Fast, via OpenRouter) for
+when the rules raise no hard objection — asks an **AI judge** (Nemotron 3.5 Bolt on NVIDIA NIM) for
 a semantic judgment. A Java **orchestrator** fuses rules + AI into a final, auditable
 decision: **APPROVE / REJECT / HUMAN_REVIEW**. Each analysis can be **streamed live**
 stage by stage (Server-Sent Events) to the bundled React demo UI. Humans can
@@ -61,8 +61,8 @@ a human-readable **explanation** of a finished decision, but can never change it
 | Database | PostgreSQL 16 + **pgvector** | relational + vector search in one store |
 | Migrations | Flyway (`V1`–`V4`) | versioned schema, `ddl-auto=validate` (never auto-DDL) |
 | RAG | pgvector cosine `<=>`, HNSW index | semantic retrieval with traceability |
-| AI judge | **Parallel Decisions Fast** decision model via OpenRouter's Decisions API | typed choice with a probability per outcome, ~1–2 s |
-| Chat AI (extraction, explanation) | `nvidia/nemotron-3.5-super-vl:free` via OpenRouter | OpenAI-compatible chat, strict JSON schema output |
+| AI judge | `nvidia/nemotron-3.5-bolt-e4b` on **NVIDIA NIM** (free) | strict JSON schema, ~1–2 s; a decision model (Parallel, paid) by config |
+| Chat AI (extraction, explanation) | the same Nemotron 3.5 Bolt model | OpenAI-compatible chat; explanations in ~2 s |
 | Embeddings | **NVIDIA NIM** `nvidia/nemotron-3.5-embed-1b` (OpenAI-compatible), **or** local deterministic | semantic retrieval; offline dev/CI |
 | Streaming | Spring MVC `SseEmitter` + dedicated executor | live per-stage progress |
 | Resilience | Resilience4j (chat); bounded retry (embeddings) | timeout + retry + circuit breaker |
@@ -213,7 +213,7 @@ POST /claims/{id}/analyze/stream   (same pipeline, progress streamed as SSE, §5
    │ REJECT  → final REJECT        (no AI)    │   cost control: skip AI
    │ REVIEW  → final HUMAN_REVIEW  (no AI)    │
    │ ALLOW   → ragFailed? HUMAN_REVIEW        │
-   │           else DecisionProvider.decide() │   AI   ← decision model (probabilities)
+   │           else DecisionProvider.decide() │   AI   ← AI judge (strict JSON schema)
    └──────────────────┬──────────────────────┘
                       │  GUARDRAILS (safety fusion):
                       │    APPROVE & conf≥min → APPROVE
@@ -227,8 +227,8 @@ POST /claims/{id}/analyze/stream   (same pipeline, progress streamed as SSE, §5
 ```
 
 Evidence used to be the first 500 characters of each chunk. In one policy the clause
-that covers the claim sat at character ~800, so neither the decision model nor the
-explanation saw it; with whole chunks the decision model's confidence on that claim
+that covers the claim sat at character ~800, so neither the AI judge nor the
+explanation saw it; with whole chunks the judge's confidence on that claim
 rose from 64–84% to 97% (`rag.max-snippet-length`, default 1200).
 
 ### 5.4 Human review & explanation
@@ -281,8 +281,8 @@ event: decision  <DecisionResponse>        — or —      event: error {status,
   orchestrator. The UI only adds a minimum on-screen time per stage (~0.5 s) so
   sub-millisecond stages can be followed; it never changes a result.
 - **What the AI sees.** `AI STARTED` carries the model's instructions and `input`, built by
-  `DecisionPromptPayload` — the same object the decision model receives as its `state`
-  (or the LLM judge receives in its prompt), so what the UI shows cannot drift from what
+  `DecisionPromptPayload` — the same object the AI judge receives in its prompt (or a
+  decision model as its `state`), so what the UI shows cannot drift from what
   the model receives: the
   claim (diagnosis, procedure, treatment, amount), the policy's coverage limit and
   exclusions, the extracted facts, the retrieved policy clauses, and the rule results.
@@ -316,10 +316,8 @@ missing information. Nothing else (no secrets, no raw DB rows) crosses the bound
 
 **Where the time goes** (one AI-approved demo claim, local stack): load ~20 ms,
 retrieve ~275 ms (one NVIDIA query embedding + a few-ms vector search), rules <1 ms,
-decision model ~0.8–2 s, persist ~85 ms. On AWS the decision model answered a live
-claim in 790 ms. A decision model returns typed probabilities instead of generating
-text, which is why it is several times faster than the LLM judge it replaced
-(Mercury 2.5, ~3–5 s, retired by OpenRouter in November 2026).
+AI judge ~1–2.5 s, persist ~85 ms. On AWS the judge answered live claims in 1.8–2.4 s
+(Nemotron 3.5 Bolt on NVIDIA NIM). The judge has changed twice, by configuration only: Inception's Mercury 2.5 (LLM, retired by OpenRouter in November 2026), then the Parallel Decisions decision model (its free tier was withdrawn days later), then Nemotron 3.5 Bolt on NVIDIA NIM.
 
 ---
 
@@ -328,34 +326,32 @@ text, which is why it is several times faster than the LLM judge it replaced
 | Interface | Prod implementation | Offline/default | Selected by |
 |-----------|---------------------|-----------------|-------------|
 | `ChatLlmProvider` | `MercuryChatProvider` (OpenAI-compatible chat, strict JSON schema) | `NoopChatLlmProvider` (fails → HUMAN_REVIEW) | `app.mercury.provider` |
-| `DecisionProvider` | `ParallelDecisionProvider` (decision model) or `MercuryDecisionProvider` (chat LLM + JSON schema) | `RuleOnlyDecisionProvider` (ALLOW→APPROVE) | `app.decision-model.engine`, then `app.mercury.provider` |
+| `DecisionProvider` | `MercuryDecisionProvider` (chat LLM + strict JSON schema; the live judge) or `ParallelDecisionProvider` (decision model) | `RuleOnlyDecisionProvider` (ALLOW→APPROVE) | `app.decision-model.engine`, then `app.mercury.provider` |
 | `EmbeddingProvider` | `OpenAiCompatibleEmbeddingProvider` (NVIDIA NIM / OpenAI) | `DeterministicEmbeddingProvider` (384-dim, hashed, lexical) | `app.embedding.provider` |
 | `DocumentStorageService` | `S3DocumentStorage` (AWS SDK v2) | `LocalDocumentStorage` | `app.storage.provider` |
 
-**Decision model (the AI judge).** `ParallelDecisionProvider` calls
-`POST https://openrouter.ai/api/alpha/decisions` with model `parallel/decisions-fast`.
-The request's `state` is the `DecisionPromptPayload` (claim, policy terms, retrieved
-clauses, rule results); its one question is a `choice` over `APPROVE`,
-`HUMAN_REVIEW` and `REJECT`, each with a written criterion. The answer is the chosen
-outcome plus a probability for every outcome; the chosen outcome's probability is the
-confidence the guardrails check. Decision models can also consult the live web: the
-sources it used are returned, streamed and shown, and because only the fictional
-policy's evidence should count, a REJECT without a rule basis still goes to a person.
-Server errors are retried; client errors (for example a free-tier daily limit) and
-refusals fail safe to `HUMAN_REVIEW`.
+**AI judge (LLM).** `MercuryDecisionProvider` (named after the model it was first built
+for) sends `DecisionPromptPayload` to the chat model with a strict JSON schema
+(`decision`, `confidence`, `reasonCodes`, `summary`, `uncertainties`) at temperature 0.
+The live judge is `nvidia/nemotron-3.5-bolt-e4b` on NVIDIA NIM, free with the embeddings
+key: in testing 1.1–1.9 s, valid JSON every run, APPROVE when the wording covers the
+procedure and HUMAN_REVIEW when it does not. Of 19 free models tried, most timed out,
+returned 404, or took 10–60 s.
 
-**Chat model (extraction, explanation).** OpenAI-compatible chat via OpenRouter,
-currently `nvidia/nemotron-3.5-super-vl:free`, with strict JSON schemas. Calls allow up
-to 4096 output tokens because reasoning models think before answering; a lower cap
-truncates the JSON (this happened with Mercury 2.5) and fails safe.
+**Decision model (alternative engine).** `ParallelDecisionProvider`
+(`DECISION_ENGINE=decision-model`) calls `POST https://openrouter.ai/api/alpha/decisions`
+with `parallel/decisions-fast`: the payload is the `state`, one `choice` question over the
+three outcomes, and the answer is a probability for each (the chosen one is the
+confidence). It answers in ~1 s and may consult the live web, whose sources are shown.
+It was the live judge until OpenRouter withdrew its free tier; it now costs $0.001 per
+decision. The judge has changed twice, by configuration only: Inception's Mercury 2.5 (LLM, retired by OpenRouter in November 2026), then the Parallel Decisions decision model (its free tier was withdrawn days later), then Nemotron 3.5 Bolt on NVIDIA NIM.
 
-On the free tier it waits in a queue: about 30–50 s per explanation, sometimes HTTP 503.
-So on Lambda the chat client makes one attempt (`AI_MAX_RETRIES=0`), and
-`ExplanationService` abandons the call after `app.explanation.deadline-ms` (40 s), which
-keeps `/explain` inside CloudFront's 60 s origin timeout. A socket read timeout alone is
-not enough: OpenRouter keeps slow requests alive by sending whitespace, which resets it.
-Failures log their cause (`HTTP 503`, `Read timed out`). A paid model such as
-`google/gemini-2.5-flash-lite` answers in ~2 s for about $0.00006, by configuration.
+**Chat model (extraction, explanation).** The same Bolt model through the
+OpenAI-compatible client (Resilience4j: 20 s timeout, one retry). Calls allow up to
+4096 output tokens because reasoning models think first (a lower cap truncated
+Mercury's JSON). `ExplanationService` still abandons a call after 40 s
+(`app.explanation.deadline-ms`) and uses the template: a socket read timeout is not
+enough, because some providers keep slow requests alive with whitespace.
 
 **Embeddings.** `EmbeddingProvider` distinguishes `embedQuery` from `embedPassages`
 (defaulting to plain `embed` for symmetric providers). The OpenAI-compatible
@@ -472,7 +468,7 @@ envelope (`timestamp, status, error, message, path, fieldErrors, traceId`).
   version, final decision, latency, traceId, reason codes — operational metadata only)
   and per human review/override. Retrievable at `GET /claims/{id}/audit`.
 - **Decision provenance**: each `decision` row records `model_provider` /
-  `model_name` (`openrouter` / `parallel/decisions-fast-…` when the AI decided,
+  `model_name` (`nvidia` / `nvidia/nemotron-3.5-bolt-e4b` when the AI decided,
   `deterministic` / `rule-engine` when the rules did) and latency.
 - **Health**: liveness/readiness probes; the AI-provider health check never fails
   liveness on a transient outage.
@@ -488,8 +484,9 @@ no API keys** (local embedder, chat `noop`, local storage); a `.env` flips on th
 real providers:
 
 ```
-MERCURY_PROVIDER=openrouter            MERCURY_MODEL=nvidia/nemotron-3.5-super-vl:free
-DECISION_ENGINE=decision-model         DECISION_MODEL=parallel/decisions-fast:free
+MERCURY_PROVIDER=nvidia                MERCURY_MODEL=nvidia/nemotron-3.5-bolt-e4b
+MERCURY_BASE_URL=https://integrate.api.nvidia.com/v1   MERCURY_API_KEY=${EMBEDDING_API_KEY}
+DECISION_ENGINE=llm                    # or decision-model (+ DECISION_MODEL_API_KEY)
 EMBEDDING_PROVIDER=openai-compatible   EMBEDDING_BASE_URL=https://integrate.api.nvidia.com/v1
 EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-1b   EMBEDDING_DIM=384
 EMBEDDING_QUERY_INPUT_TYPE=query       EMBEDDING_PASSAGE_INPUT_TYPE=passage
@@ -551,7 +548,7 @@ Browser ──HTTPS──▶ CloudFront ─── default ──▶ S3 site buck
                              └─ container image: Spring Boot + AWS Lambda Web Adapter
                                   ├─▶ Neon Postgres 18 + pgvector (us-east-1, SSL)
                                   ├─▶ S3 documents bucket (IAM role)
-                                  ├─▶ OpenRouter: decision model + chat model
+                                  ├─▶ NVIDIA NIM: AI judge + explanations (free)
                                   └─▶ NVIDIA NIM: embeddings
 ```
 
@@ -591,8 +588,8 @@ design language, built to show the pipeline to a reviewer:
 - **Pipeline view**: seven stages (Authenticate, Load, Retrieve, Rules, AI judge,
   Guardrails, Audit), each a 3D cube that spins while running and lands on a ✓ / ✕ /
   ! / – result face, with the real technology chips, the server-measured duration, and
-  live details (clauses + embedding model, rules passed/flagged, the decision model's
-  probabilities, guardrail overrides, decision/trace ids).
+  live details (clauses + embedding model, rules passed/flagged, the AI judge's verdict
+  and confidence, or a decision model's probabilities, guardrail overrides, ids).
 - **Panels**: claim, facts, policy, verdict (confidence ring, dataset-label match),
   **what the AI compared** (the exact input from the `AI STARTED` event, the decision
   model's probability bars and any web sources it consulted, or why it was not called), policy evidence, AI explanation, human review
@@ -619,9 +616,9 @@ design language, built to show the pipeline to a reviewer:
   they rank clauses well but are not strong matches in absolute terms.
 - NVIDIA's free endpoint is used with one input per request because multi-input
   batches fail intermittently; a paid/self-hosted NIM can raise `EMBEDDING_BATCH_SIZE`.
-- Both AI models run on OpenRouter's **free tier**, which has a daily request cap and a
-  slow queue for the chat model: explanations often come from the template. Claims
-  still decide in ~1 s, and an over-limit decision model fails safe to human review.
+- The AI runs on NVIDIA NIM's **free tier**: availability and speed vary by model
+  (several listed models return 404). Failures fail safe to human review; explanations
+  fall back to the template.
 - The default local embedder is **lexical, not semantic** — it exists so dev/CI run
   with no keys; real retrieval quality comes from the hosted embedding provider.
 
@@ -635,10 +632,9 @@ design language, built to show the pipeline to a reviewer:
   between chunks and their vectors, simpler ops.
 - **Rules + AI (not AI-only)** — safety, determinism, auditability, and cost control;
   the model assists judgment but cannot cause an ungrounded approve/reject.
-- **A decision model for the judge** — the judge's job is to pick one of three
-  outcomes, not to write prose. A decision model returns calibrated probabilities per
-  outcome in about a second, which is faster, cheaper and easier to put guardrails
-  around than parsing an LLM's JSON. The LLM judge stays available by configuration.
+- **A provider interface for the judge** — there have been three judges (Mercury, a
+  decision model, Nemotron 3.5 Bolt) as models were retired or went paid, each by
+  configuration. A decision model's per-outcome probabilities remain available.
 - **Matryoshka dimensions over a re-migration** — asking the embedding model for 384-d
   vectors kept the existing column and HNSW index; only the vectors were rebuilt.
 - **SSE over WebSockets** — one-way progress fits SSE; it reuses the existing HTTP,

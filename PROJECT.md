@@ -19,8 +19,8 @@ A synthetic health-insurance **claim** comes in. The system:
 2. **Retrieves** the most relevant **policy clauses** via RAG (PostgreSQL + pgvector,
    embeddings from **NVIDIA NIM**),
 3. runs **deterministic business rules**,
-4. and — only if the rules raise no hard objection — asks a **decision model**
-   (**Parallel Decisions Fast** via OpenRouter) for a judgment with a probability per outcome.
+4. and — only if the rules raise no hard objection — asks an **AI judge**
+   (**Nemotron 3.5 Bolt** on NVIDIA NIM, free) for a verdict and a confidence in ~2 s.
 
 A Java **orchestrator** fuses rules + AI into a final, auditable decision —
 **APPROVE / REJECT / HUMAN_REVIEW** — grounded in retrieved evidence. Every stage can
@@ -34,7 +34,7 @@ failure routes to a human.
 
 **Nothing is hidden.** The demo UI shows the whole policy rulebook live from
 PostgreSQL (the terms the rules check and the wording indexed in pgvector), and for
-every analysis the exact package the decision model was given and what it answered (§6).
+every analysis the exact package the AI judge was given and what it answered (§6).
 
 **Live:** https://d97tm0469lmul.cloudfront.net (AWS Lambda + CloudFront, §15).
 
@@ -67,8 +67,8 @@ flowchart LR
 
   pg[("PostgreSQL<br/>+ pgvector")]
   store[("Object storage<br/>Local / S3")]
-  dm["Parallel Decisions Fast<br/>decision model (OpenRouter)"]
-  llm["Nemotron 3.5 Super<br/>chat model (OpenRouter)"]
+  llm["Nemotron 3.5 Bolt<br/>AI judge + explanations (NVIDIA NIM)"]
+  dm["Parallel Decisions<br/>decision model (optional)"]
   nim["NVIDIA NIM<br/>nemotron-3.5-embed-1b"]
 
   ui -->|"REST + SSE, Bearer JWT"| sec
@@ -81,14 +81,14 @@ flowchart LR
   orch --> rules
   orch --> rag --> emb --> nim
   rag --> pg
-  orch --> dprov --> dm
-  claim --> chat --> llm
+  orch --> dprov --> chat --> llm
+  dprov -.-> dm
   claim --> pg
   orch --> pg
   audit --> pg
 ```
 
-Every external dependency (decision model, chat LLM, embeddings, object storage) sits
+Every external dependency (AI judge, chat LLM, embeddings, object storage) sits
 behind an interface chosen by configuration, so providers swap without touching
 business logic — and the whole stack runs offline with zero API keys for dev/CI.
 
@@ -102,8 +102,8 @@ business logic — and the whole stack runs offline with zero API keys for dev/C
 | Framework | Spring Boot 3.5 (Web, Validation, Data JPA, Security, Actuator) |
 | Database | PostgreSQL 16 + **pgvector** (HNSW cosine index) |
 | Migrations | Flyway `V1`–`V4` (`ddl-auto=validate`) |
-| AI judge | **Parallel Decisions Fast** decision model via OpenRouter's Decisions API — typed choice, probability per outcome |
-| AI (extraction, explanation) | `nvidia/nemotron-3.5-super-vl:free` via OpenRouter — OpenAI-compatible, strict JSON schema |
+| AI judge | `nvidia/nemotron-3.5-bolt-e4b` on **NVIDIA NIM** (free) — strict JSON schema, ~1–2 s; Parallel decision model by config |
+| AI (extraction, explanation) | the same Nemotron 3.5 Bolt model — OpenAI-compatible, ~2 s |
 | Embeddings | **NVIDIA NIM** `nemotron-3.5-embed-1b` (384-d, query/passage) **or** local deterministic (offline) |
 | Streaming | Spring `SseEmitter` on a dedicated executor (MDC + security context carried over) |
 | Resilience | Resilience4j (timeout, retry, circuit breaker); bounded retry for embeddings |
@@ -156,7 +156,7 @@ flowchart TD
   agg -->|ALLOW| ragok{"RAG ok?"}
 
   ragok -->|failed| revR["HUMAN_REVIEW<br/>reason: RAG_FAILURE"]
-  ragok -->|ok| aicall["AI: decision model decide(context)"]
+  ragok -->|ok| aicall["AI judge: decide(context)"]
 
   aicall --> aifail{"AI error?"}
   aifail -->|yes| revA["HUMAN_REVIEW<br/>reason: AI_PROVIDER_FAILURE"]
@@ -190,7 +190,7 @@ flowchart TD
 | Load | ~20 ms | local Postgres, pooled connections |
 | Retrieve | ~275 ms | one NVIDIA query embedding; the vector search itself is a few ms |
 | Rules | <1 ms | in-memory Java |
-| AI judge | ~0.8–2 s | one decision-model call (790 ms live on AWS); it returns probabilities, not generated text |
+| AI judge | ~1–2.5 s | one Nemotron 3.5 Bolt call on NVIDIA NIM (1.8–2.4 s live on AWS) |
 | Guardrails | ~0 ms | comparisons in Java |
 | Persist + audit | ~85 ms | decision, evidence snapshot, audit row |
 
@@ -212,18 +212,17 @@ on one; a Java guardrail has the last word.
 | 4 | General and pre-existing waiting periods have passed | Java rule |
 | 5 | Pre-existing condition status is known | Java rule |
 | 6 | Every required fact is present and none conflict | Java rules |
-| 7 | The decision model weighs the claim against the retrieved policy wording and picks APPROVE | **Decision model (advisory)** |
-| 8 | Its probability for APPROVE is at least 0.5, so Java accepts the suggestion | Java guardrail |
+| 7 | The AI judge weighs the claim against the retrieved policy wording and suggests APPROVE | **AI judge (advisory)** |
+| 8 | Its confidence is at least 0.5, so Java accepts the suggestion | Java guardrail |
 
-If a rule fails, the rules decide (REJECT or HUMAN_REVIEW) and the decision model is
+If a rule fails, the rules decide (REJECT or HUMAN_REVIEW) and the AI judge is
 never called. If it is unsure, suggests a REJECT no rule supports, or fails, Java sends
 the claim to a person.
 
-**What the decision model receives.** `DecisionPromptPayload` builds one JSON package
-from the decision context. It is the model's `state`, and the same object is sent to the
+**What the AI judge receives.** `DecisionPromptPayload` builds one JSON package from
+the decision context. It goes into the judge's prompt, and the same object is sent to the
 UI on the `AI STARTED` stream event, so what the UI shows is what the model got. The
-request asks one `choice` question whose options are the three outcomes, each with a
-written criterion. From a live run on AWS (CLM-SYN-005, trimmed):
+judge must answer in a strict JSON schema. From a live run on AWS (CLM-SYN-005, trimmed):
 
 ```jsonc
 {
@@ -231,43 +230,28 @@ written criterion. From a live run on AWS (CLM-SYN-005, trimmed):
               "treatment": "2-day inpatient", "claimAmount": 110000, "currency": "INR" },
   "policy": { "coverageLimit": 1000000,
               "exclusions": ["Cosmetic surgery", "Infertility treatment"] },
-  "extractedFacts": [ { "key": "diagnosis", "value": "Kidney stones", "status": "KNOWN" },
-                      { "key": "procedure", "value": "Ureteroscopy", "status": "KNOWN" } /* 5 in all */ ],
-  "policyEvidence": [ { "page": 1, "text": "… or gallstones or cholecystitis. 3.2 Appendectomy: …" } /* top 3 from pgvector */ ],
-  "ruleReasonCodes": [ "NO_CONFLICTING_INFORMATION", "WITHIN_COVERAGE_LIMIT", "NO_EXCLUSION_MATCH",
-                       "REQUIRED_INFORMATION_PRESENT", "POLICY_ACTIVE", "PRE_EXISTING_STATUS_KNOWN",
-                       "WAITING_PERIOD_SATISFIED" ]
+  "extractedFacts": [ { "key": "diagnosis", "value": "Kidney stones", "status": "KNOWN" } /* 5 in all */ ],
+  "policyEvidence": [ { "page": 1, "text": "… 3.5 Ureteroscopy: …" } /* whole chunks from pgvector */ ],
+  "ruleReasonCodes": [ "POLICY_ACTIVE", "NO_EXCLUSION_MATCH", "WITHIN_COVERAGE_LIMIT", … ]
 }
 ```
 
 No patient identity, claim or policy ids, provider or dates reach the model; dates are
-checked by the Java rules. On that run the decision model answered in **790 ms**:
+checked by the Java rules. On that run the judge (Nemotron 3.5 Bolt) answered in
+**2.4 s**: APPROVE at 0.95, *"covered under policy wording 3.5"*. Confidence was above
+0.5 and no rule objected, so Java made it the final APPROVE.
 
-```jsonc
-{ "decision": { "type": "choice", "choice": "APPROVE",
-                "probabilities": { "APPROVE": 0.92, "HUMAN_REVIEW": 0.08, "REJECT": 0.00 } } }
-```
-
-The probability of the chosen outcome (0.92) is the confidence the guardrails check:
-above 0.5, with no rule objecting, so Java made it the final APPROVE.
-
-**Why a decision model.** The judge picks one of three outcomes; it does not need to
-write prose. A decision model returns calibrated probabilities directly, in about a
-second, which is several times faster than the LLM judge it replaced (Mercury 2.5,
-3–5 s, retired by OpenRouter in November 2026) and easier to put guardrails around.
-In testing it also caught what the text-matching rule cannot: for a rhinoplasty claim
-whose exclusion list says "cosmetic surgery", it answered REJECT at 85% from the
-policy wording. That AI-only rejection still goes to a person.
+**Three judges, no business-logic change.** The judge has changed twice, by configuration only: Inception's Mercury 2.5 (LLM, retired by OpenRouter in November 2026), then the Parallel Decisions decision model (its free tier was withdrawn days later), then Nemotron 3.5 Bolt on NVIDIA NIM. The Parallel decision
+model (a probability per outcome in ~1 s) is still one setting away, at $0.001 per
+decision. In testing it caught what text matching cannot: a rhinoplasty claim, when the
+exclusion list only says "cosmetic surgery", came back REJECT at 85% from the policy
+wording, which Java still sends to a person.
 
 **Whole clauses, not fragments.** Each retrieved chunk goes in whole (~1000
 characters). It used to be cut to 500, which dropped POL-SYN-001's covering clause
 ("3.1 Laparoscopic cholecystectomy …", at character ~800); with it, the model's
-confidence on CLM-SYN-001 rose from 64–84% to 97%.
+confidence on CLM-SYN-001 rose from 64–84% to 97% (measured with the decision model).
 
-**It can consult the web.** Decision models research the live web; the sources it
-used come back with the answer and are shown in the UI. Because the policy is
-fictional, only the evidence in the state should count, which is one more reason the
-AI can never reject on its own.
 
 ---
 
@@ -283,7 +267,7 @@ sequenceDiagram
   participant R as RetrievalService
   participant N as NVIDIA NIM
   participant RE as RuleEngine
-  participant AI as Decision model (OpenRouter)
+  participant AI as AI judge (NVIDIA NIM)
 
   U->>C: POST /claims/{id}/analyze (Idempotency-Key?)
   C->>O: analyze(claimId, key)
@@ -332,7 +316,7 @@ sequenceDiagram
   O-->>UI: stage RULES COMPLETED {outcome, passed, flagged}
   alt rules ALLOW
     O-->>UI: stage AI STARTED {instructions, input: the exact state the model receives}
-    O-->>UI: stage AI COMPLETED {suggestion, probabilities, model, sources}
+    O-->>UI: stage AI COMPLETED {suggestion, confidence, model, summary}
   else rules decided
     O-->>UI: stage AI SKIPPED {reason: RULES_DECIDED}
   end
@@ -344,7 +328,7 @@ sequenceDiagram
 
 - `EventSource` cannot send an `Authorization` header, so the UI reads the stream with
   `fetch`. It keeps each cube on screen for at least ~0.5 s so sub-millisecond stages
-  can be followed; the AI cube spins for exactly as long as the decision model takes.
+  can be followed; the AI cube spins for exactly as long as the AI judge takes.
 - The completion re-enters Spring Security as an ASYNC dispatch, which is permitted;
   the rate limiter skips it so a stream is charged once.
 
@@ -569,7 +553,7 @@ flowchart LR
   url --> lam["Lambda: Spring Boot<br/>+ Lambda Web Adapter"]
   lam --> neon[("Neon Postgres<br/>+ pgvector")]
   lam --> docs[("S3 documents")]
-  lam --> or["OpenRouter<br/>decision model + chat"]
+  lam --> or["NVIDIA NIM<br/>AI judge + explanations"]
   lam --> nim["NVIDIA NIM<br/>embeddings"]
   gh["GitHub Actions"] -->|"OIDC role"| ecr["ECR image"] --> lam
 ```
@@ -626,7 +610,7 @@ flowchart LR
   list["Claims<br/>search · filter by expected outcome"]
   detail["Claim detail"]
   pipe["7 live 3D stages<br/>(SSE, server timings)"]
-  ai["What the AI compared<br/>exact input + probabilities"]
+  ai["What the AI compared<br/>exact input + verdict"]
   rest["Verdict · evidence · explanation<br/>human review · audit trail"]
   land --> rb
   land --> list --> detail
@@ -635,11 +619,11 @@ flowchart LR
 
 - **Pipeline:** each stage is a cube that spins while running and lands on ✓ / ✕ / ! / –,
   with the real technology chips and live details (clauses and embedding model, rules
-  passed or flagged, the decision model's probabilities, guardrail overrides, ids).
+  passed or flagged, the AI judge's verdict and confidence, guardrail overrides, ids).
 - **What the AI compared:** the claim, the policy terms, the retrieved clauses, the
-  facts and rule results the decision model received, its probability for each outcome
-  as bars, any web sources it consulted, and Java's ruling, or why it was not called. The raw prompt and JSON are one click away.
-- **Plain-English explanation:** verdict, why (checks and the AI's probabilities), the
+  facts and rule results the AI judge received, its verdict and confidence (or, with the
+  decision-model engine, probability bars and web sources), and Java's ruling. The raw prompt and JSON are one click away.
+- **Plain-English explanation:** verdict, why (checks and the AI judge's verdict), the
   policy sentence that names the procedure, and what to check. It says who wrote it: the
   chat model, or the template when the free model is busy or slower than 40 s.
 - **Policy rulebook:** every policy from PostgreSQL with the rule each term feeds, and
@@ -684,9 +668,8 @@ button for the bearer token).
 
 ## 19. Limitations & future work
 
-- Both AI models use OpenRouter's **free tier** (daily request cap; the chat model
-  queues for 30–50 s), so explanations often come from the template. A paid chat model
-  is a one-line configuration change.
+- The AI uses NVIDIA NIM's **free tier**; free models come and go (two were withdrawn
+  during this project), so the engine and model are configuration.
 - Authorization is **role-based**; per-row claim ownership (a USER seeing only their
   own claims) is a documented future enhancement.
 - Analysis runs inside the request (plain or streamed); the async job model (`202` +
