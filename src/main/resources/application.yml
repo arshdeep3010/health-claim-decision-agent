@@ -110,7 +110,7 @@ app:
     engine: ${DECISION_ENGINE:llm}
     base-url: ${DECISION_MODEL_BASE_URL:https://openrouter.ai/api}
     api-key: ${DECISION_MODEL_API_KEY:${MERCURY_API_KEY:}}
-    model: "${DECISION_MODEL:parallel/decisions-fast:free}"
+    model: "${DECISION_MODEL:parallel/decisions-fast}"   # paid on OpenRouter ($0.001/decision); the free variant was withdrawn
     timeout-ms: ${DECISION_MODEL_TIMEOUT_MS:30000}
     max-retries: ${DECISION_MODEL_MAX_RETRIES:2}
   ratelimit:

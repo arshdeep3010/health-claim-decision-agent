@@ -19,7 +19,7 @@ public record DecisionModelProperties(
         @DefaultValue("llm") String engine,
         @DefaultValue("https://openrouter.ai/api") String baseUrl,
         @DefaultValue("") String apiKey,
-        @DefaultValue("parallel/decisions-fast:free") String model,
+        @DefaultValue("parallel/decisions-fast") String model,
         @DefaultValue("30000") int timeoutMs,
         @DefaultValue("2") int maxRetries
 ) {

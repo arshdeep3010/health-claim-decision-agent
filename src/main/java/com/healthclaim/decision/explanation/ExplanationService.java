@@ -41,12 +41,14 @@ public class ExplanationService {
             **<Approved | Rejected | Needs review>.** One sentence saying what was claimed and why.
 
             **Why**
-            - 2 to 4 bullets in plain words: the policy checks that decided it, and what the
-              policy wording says about this procedure (quote a few words from policyWording).
-            - If aiJudge is present, one bullet with its verdict and probabilities.
+            - 2 to 4 bullets in plain words: the policy checks that decided it.
+            - One bullet quoting, in double quotes, the words from policyWording that cover or
+              exclude this procedure, if policyWording mentions it.
+            - If aiJudge is present, one bullet with its verdict.
 
             **Worth checking**
-            - Only if there are uncertainties or missing information; otherwise omit this part.""";
+            - Only if there are uncertainties or missing information. If there are none, leave
+              out this heading and everything under it.""";
 
     /** Who wrote an explanation: the LLM (with its model id) or the template fallback. */
     public record Explanation(String text, String source, String model) {

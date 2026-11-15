@@ -21,7 +21,7 @@ public record MercuryProperties(
 ) {
     public boolean isOpenAiCompatible() {
         return switch (provider == null ? "" : provider.toLowerCase()) {
-            case "openrouter", "openai-compatible", "inception", "mercury" -> true;
+            case "openrouter", "openai-compatible", "inception", "mercury", "nvidia" -> true;
             default -> false;
         };
     }

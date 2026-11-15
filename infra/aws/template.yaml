@@ -25,10 +25,11 @@ Parameters:
     Type: String
     NoEcho: true
     MinLength: 32
-  MercuryApiKey:
+  OpenRouterApiKey:
     Type: String
     NoEcho: true
     Default: ""
+    Description: OpenRouter key, used only when DECISION_ENGINE=decision-model (paid, $0.001/decision).
   EmbeddingApiKey:
     Type: String
     NoEcho: true
@@ -138,18 +139,19 @@ Resources:
           STORAGE_PROVIDER: s3
           S3_BUCKET: !Ref DocumentsBucket
           S3_REGION: !Ref AWS::Region
-          MERCURY_PROVIDER: openrouter
-          MERCURY_BASE_URL: https://openrouter.ai/api/v1
-          # Chat model for explanations and fact extraction (OpenAI-compatible client).
-          MERCURY_MODEL: "nvidia/nemotron-3.5-super-vl:free"
-          MERCURY_API_KEY: !Ref MercuryApiKey
-          # The free chat model queues for ~30 s: one attempt with a 50 s limit, which keeps
-          # /explain inside CloudFront's 60 s origin timeout (retrying a slow queue only adds time).
-          AI_TIMEOUT_MS: "50000"
-          AI_MAX_RETRIES: "0"
-          # The AI judge: a decision model via OpenRouter's Decisions API (same key).
-          DECISION_ENGINE: decision-model
-          DECISION_MODEL: "parallel/decisions-fast:free"
+          # Chat model: the AI judge (strict JSON schema) and explanations. NVIDIA's hosted
+          # Nemotron 3.5 Bolt is free with the same key as the embeddings and answers in ~1-2 s.
+          MERCURY_PROVIDER: nvidia
+          MERCURY_BASE_URL: https://integrate.api.nvidia.com/v1
+          MERCURY_MODEL: nvidia/nemotron-3.5-bolt-e4b
+          MERCURY_API_KEY: !Ref EmbeddingApiKey
+          AI_TIMEOUT_MS: "20000"
+          AI_MAX_RETRIES: "1"
+          # The AI judge engine: "llm" uses the chat model above. "decision-model" switches to
+          # Parallel Decisions on OpenRouter (paid; the free variant was withdrawn in Nov 2026).
+          DECISION_ENGINE: llm
+          DECISION_MODEL: parallel/decisions-fast
+          DECISION_MODEL_API_KEY: !Ref OpenRouterApiKey
           EMBEDDING_PROVIDER: openai-compatible
           EMBEDDING_BASE_URL: https://integrate.api.nvidia.com/v1
           EMBEDDING_MODEL: nvidia/nemotron-3.5-embed-1b
