@@ -112,7 +112,7 @@ business logic — and the whole stack runs offline with zero API keys for dev/C
 | Observability | Micrometer + Prometheus, structured JSON logs |
 | Storage | Local FS (dev) / S3-compatible (deploy, AWS SDK v2) |
 | Demo UI | React 19, TypeScript, Vite 6, Motion |
-| Testing | JUnit 5, Mockito, Testcontainers, MockWebServer, MockRestServiceServer, LocalStack, Vitest (**122 backend + 23 frontend tests**) |
+| Testing | JUnit 5, Mockito, Testcontainers, MockWebServer, MockRestServiceServer, LocalStack, Vitest (**122 backend + 24 frontend tests**) |
 | Ship | Maven (`./mvnw`), multi-stage Docker, GitHub Actions, AWS ECR + Lambda |
 
 ---
@@ -661,7 +661,7 @@ docker compose up --build          # use DB_HOST_PORT=5433 if 5432 is taken
 
 # or run tests
 ./mvnw clean verify                # 122 backend tests (needs Docker for Testcontainers)
-cd frontend && npm test            # 23 frontend tests (Vitest)
+cd frontend && npm test            # 24 frontend tests (Vitest)
 ```
 
 Real AI is configuration only (in `.env`): `MERCURY_PROVIDER=openrouter` + key/model

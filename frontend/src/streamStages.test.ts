@@ -63,6 +63,11 @@ describe('finalStatus', () => {
     expect(s.detail).toContain('safely routed to human review')
   })
 
+  it('shows a correct rejection as a successful guardrail step, not a failure', () => {
+    const s = finalStatus(ev('GUARDRAILS', 'COMPLETED', { decision: 'REJECT', decidedBy: 'RULES', overrides: [] }))
+    expect(s).toMatchObject({ state: 'done', tone: 'pass', result: 'Final verdict: Rejected', detail: ['Decided by rules'] })
+  })
+
   it('lists guardrail overrides in plain words', () => {
     const s = finalStatus(ev('GUARDRAILS', 'COMPLETED', { decision: 'HUMAN_REVIEW', decidedBy: 'AI_WITH_GUARDRAILS', overrides: ['LOW_AI_CONFIDENCE'] }))
     expect(s).toMatchObject({ tone: 'warn', result: 'Final verdict: Needs review', detail: ['AI confidence too low'] })

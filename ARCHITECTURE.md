@@ -504,7 +504,7 @@ actuator, and requires real secrets. `.env.example` documents every variable.
 
 ## 13. Testing strategy
 
-**122 backend tests + 23 frontend tests**, all offline/CI-safe (no paid APIs):
+**122 backend tests + 24 frontend tests**, all offline/CI-safe (no paid APIs):
 
 - **Unit**: rule engine + aggregation, extractor normalization, decision-model
   request/response mapping (state, choice question, probabilities, sources, refusal,

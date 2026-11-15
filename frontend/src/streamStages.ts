@@ -88,7 +88,9 @@ export function finalStatus(e: StageEvent): StageStatus {
     case 'GUARDRAILS': {
       const copy = DECISION_COPY[str(d.decision)] ?? DECISION_COPY.HUMAN_REVIEW
       const overrides = list(d.overrides)
-      return { state: 'done', tone: copy.tone, result: `Final verdict: ${copy.word}`,
+      // The cube shows what the guardrails did, not the verdict: a correct rejection is a
+      // successful step (✓); amber (!) means a guardrail stepped in and sent it to a person.
+      return { state: 'done', tone: overrides.length ? 'warn' : 'pass', result: `Final verdict: ${copy.word}`,
         detail: overrides.length ? overrides.map(humanize) : [d.decidedBy === 'RULES' ? 'Decided by rules' : 'Java confirmed the AI outcome'] }
     }
     case 'PERSIST':

@@ -74,7 +74,7 @@ This project is built incrementally. Each phase compiles and tests before the ne
 - [x] **Phase 9** — Human review + explanation generation
 - [x] **Phase 10** — Audit trail + observability (Micrometer/Prometheus, structured logging)
 - [x] **Phase 11** — Security (JWT auth, roles USER/REVIEWER/ADMIN, CORS)
-- [x] **Phase 12** — Testing hardening (unit + Testcontainers + contract + security; **122 backend + 23 frontend tests** today)
+- [x] **Phase 12** — Testing hardening (unit + Testcontainers + contract + security; **122 backend + 24 frontend tests** today)
 - [x] **Phase 13** — Docker (multi-stage image, non-root, compose stack verified end-to-end)
 - [x] **Phase 14** — Cloud deployment (AWS ECR + Lambda) + S3 document storage
 - [x] **Phase 15** — CI/CD (GitHub Actions: PR/main build+test, image publish to GHCR)
