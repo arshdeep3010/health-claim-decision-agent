@@ -21,6 +21,17 @@ describe('finalStatus', () => {
     expect(s.detail).toEqual(['top similarity 0.30', 'top-k 5', '12 ms', 'nvidia/nemotron-3.5-embed-1b'])
   })
 
+  it('says when a cached query vector was reused', () => {
+    const s = finalStatus(ev('RETRIEVE', 'COMPLETED', { clauses: 3, topK: 5, topSimilarity: 0.3, embeddingModel: 'm', method: 'cached_vector' }))
+    expect(s.detail).toEqual(['top similarity 0.30', 'top-k 5', '12 ms', 'm', 'cached query vector'])
+  })
+
+  it('says when retrieval fell back to keyword search', () => {
+    const s = finalStatus(ev('RETRIEVE', 'COMPLETED', { clauses: 2, topK: 5, topSimilarity: 0.41, embeddingModel: 'm', method: 'keyword' }))
+    expect(s).toMatchObject({ state: 'done', tone: 'pass', result: '2 policy clauses retrieved' })
+    expect(s.detail).toEqual(['keyword match (embedding API busy)', 'top score 0.41', 'top-k 5', '12 ms'])
+  })
+
   it('warns when no policy wording matched', () => {
     expect(finalStatus(ev('RETRIEVE', 'COMPLETED', { clauses: 0 }))).toMatchObject({ tone: 'warn', result: 'No matching clauses' })
   })

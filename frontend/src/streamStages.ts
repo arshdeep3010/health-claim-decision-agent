@@ -63,7 +63,9 @@ export function finalStatus(e: StageEvent): StageStatus {
     case 'RETRIEVE': {
       const n = Number(d.clauses ?? 0)
       return n > 0
-        ? { state: 'done', tone: 'pass', result: `${n} policy clauses retrieved`, detail: [`top similarity ${Number(d.topSimilarity ?? 0).toFixed(2)}`, `top-k ${str(d.topK)}`, t, str(d.embeddingModel)].filter(Boolean) }
+        ? d.method === 'keyword'
+          ? { state: 'done', tone: 'pass', result: `${n} policy clauses retrieved`, detail: ['keyword match (embedding API busy)', `top score ${Number(d.topSimilarity ?? 0).toFixed(2)}`, `top-k ${str(d.topK)}`, t] }
+          : { state: 'done', tone: 'pass', result: `${n} policy clauses retrieved`, detail: [`top similarity ${Number(d.topSimilarity ?? 0).toFixed(2)}`, `top-k ${str(d.topK)}`, t, str(d.embeddingModel), d.method === 'cached_vector' ? 'cached query vector' : ''].filter(Boolean) }
         : { state: 'done', tone: 'warn', result: 'No matching clauses', detail: ['no policy wording indexed for this policy', t] }
     }
     case 'RULES': {

@@ -59,7 +59,7 @@ class DecisionRagFailureIntegrationTest {
 
     @BeforeEach
     void ragDown() {
-        when(retrievalService.retrieve(any(), any(), any()))
+        when(retrievalService.search(any(), any(), any()))
                 .thenThrow(new RuntimeException("vector store unavailable"));
     }
 

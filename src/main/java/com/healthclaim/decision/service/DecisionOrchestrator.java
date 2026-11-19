@@ -124,8 +124,11 @@ public class DecisionOrchestrator {
             emit(listener, StageEvent.started(AnalysisStage.RETRIEVE));
             long ragStart = System.nanoTime();
             boolean ok = false;
+            RetrievalService.Method method = null;
             try {
-                evidence = retrievalService.retrieve(data.policyId(), query, properties.evidenceTopK());
+                RetrievalService.Retrieval retrieval = retrievalService.search(data.policyId(), query, properties.evidenceTopK());
+                evidence = retrieval.evidence();
+                method = retrieval.method();
                 ok = true;
             } catch (Exception e) {
                 ragFailed = true;
@@ -139,7 +142,8 @@ public class DecisionOrchestrator {
                             "clauses", evidence.size(),
                             "topK", properties.evidenceTopK(),
                             "topSimilarity", evidence.stream().mapToDouble(EvidenceResult::similarity).max().orElse(0.0),
-                            "embeddingModel", retrievalService.embeddingModel())));
+                            "embeddingModel", retrievalService.embeddingModel(),
+                            "method", method.name().toLowerCase(java.util.Locale.ROOT))));
         } else {
             emit(listener, StageEvent.skipped(AnalysisStage.RETRIEVE, details("reason", "NO_QUERY_TERMS")));
         }
