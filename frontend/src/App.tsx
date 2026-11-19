@@ -103,9 +103,9 @@ export default function App() {
         <div className="container site-notice-inner">
           <b>Notice:</b>
           <span>
-            The free NVIDIA AI model is sometimes busy. When it is, the app reuses saved pgvector search vectors or
-            falls back to keyword search, and a claim the AI can’t judge goes to human review. We’re fixing this by
-            adding an AWS Bedrock fallback.
+            NVIDIA’s free nemotron-3.5-embed-1b model was overloaded, so policy search now runs on the larger
+            nemotron-3.5-embed-8b. If a free model is busy, the app reuses saved pgvector search vectors or falls back to
+            keyword search, and a claim the AI can’t judge goes to human review. An AWS Bedrock fallback is in progress.
           </span>
         </div>
       </div>

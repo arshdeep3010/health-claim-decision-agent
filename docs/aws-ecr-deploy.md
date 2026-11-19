@@ -170,7 +170,7 @@ To turn on real AI later, flip `MERCURY_PROVIDER=openrouter` and add
 `MERCURY_BASE_URL`, `MERCURY_API_KEY`, `MERCURY_MODEL`. For semantic retrieval set
 the embedding vars too (NVIDIA NIM: `EMBEDDING_PROVIDER=openai-compatible`,
 `EMBEDDING_BASE_URL=https://integrate.api.nvidia.com/v1`,
-`EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-1b`, `EMBEDDING_API_KEY`,
+`EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-8b`, `EMBEDDING_API_KEY`,
 `EMBEDDING_QUERY_INPUT_TYPE=query`, `EMBEDDING_PASSAGE_INPUT_TYPE=passage`,
 `EMBEDDING_REQUEST_DIMENSIONS=true`, `EMBEDDING_TRUNCATE=END`,
 `EMBEDDING_BATCH_SIZE=1`). It returns 384-d vectors, so `EMBEDDING_DIM=384` keeps the

@@ -122,7 +122,7 @@ docker push "$IMAGE"
 
 > If `EMBEDDING_PROVIDER` changes the vector dimension, set `EMBEDDING_DIM` to match
 > and deploy against a **fresh** schema — the app fails fast on a dimension mismatch.
-> NVIDIA's `nemotron-3.5-embed-1b` can return 384-d vectors (`EMBEDDING_REQUEST_DIMENSIONS=true`),
+> NVIDIA's `nemotron-3.5-embed-8b` can return 384-d vectors (`EMBEDDING_REQUEST_DIMENSIONS=true`),
 > so it keeps the default schema; after switching models, re-embed with
 > `POST /api/v1/policies/{id}/ingest?reembed=true`.
 >

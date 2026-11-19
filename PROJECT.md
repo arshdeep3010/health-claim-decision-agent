@@ -69,7 +69,7 @@ flowchart LR
   store[("Object storage<br/>Local / S3")]
   llm["Nemotron 3.5 Bolt<br/>AI judge + explanations (NVIDIA NIM)"]
   dm["Parallel Decisions<br/>decision model (optional)"]
-  nim["NVIDIA NIM<br/>nemotron-3.5-embed-1b"]
+  nim["NVIDIA NIM<br/>nemotron-3.5-embed-8b"]
 
   ui -->|"REST + SSE, Bearer JWT"| sec
   client -->|HTTPS + Bearer JWT| sec
@@ -104,7 +104,7 @@ business logic — and the whole stack runs offline with zero API keys for dev/C
 | Migrations | Flyway `V1`–`V4` (`ddl-auto=validate`) |
 | AI judge | `nvidia/nemotron-3.5-bolt-e4b` on **NVIDIA NIM** (free) — strict JSON schema, ~1–2 s; Parallel decision model by config |
 | AI (extraction, explanation) | the same Nemotron 3.5 Bolt model — OpenAI-compatible, ~2 s |
-| Embeddings | **NVIDIA NIM** `nemotron-3.5-embed-1b` (384-d, query/passage) **or** local deterministic (offline) |
+| Embeddings | **NVIDIA NIM** `nemotron-3.5-embed-8b` (384-d, query/passage) **or** local deterministic (offline) |
 | Streaming | Spring `SseEmitter` on a dedicated executor (MDC + security context carried over) |
 | Resilience | Resilience4j (timeout, retry, circuit breaker); bounded retry for embeddings |
 | PDF | Apache PDFBox |
@@ -384,7 +384,7 @@ flowchart LR
   search --> ev["Evidence<br/>chunk · doc · page · section · score"]
 ```
 
-`nemotron-3.5-embed-1b` is an **asymmetric** retrieval model (queries and passages
+`nemotron-3.5-embed-8b` is an **asymmetric** retrieval model (queries and passages
 are embedded differently) and a **Matryoshka** model: it natively produces 2048-d
 vectors but can return 384-d ones, which fit the existing `vector(384)` column with no
 migration. Every policy-based decision is traceable to the retrieved chunk (document,

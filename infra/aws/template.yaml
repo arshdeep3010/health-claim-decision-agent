@@ -154,7 +154,7 @@ Resources:
           DECISION_MODEL_API_KEY: !Ref OpenRouterApiKey
           EMBEDDING_PROVIDER: openai-compatible
           EMBEDDING_BASE_URL: https://integrate.api.nvidia.com/v1
-          EMBEDDING_MODEL: nvidia/nemotron-3.5-embed-1b
+          EMBEDDING_MODEL: nvidia/nemotron-3.5-embed-8b
           EMBEDDING_API_KEY: !Ref EmbeddingApiKey
           EMBEDDING_DIM: "384"
           EMBEDDING_QUERY_INPUT_TYPE: query

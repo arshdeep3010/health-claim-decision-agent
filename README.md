@@ -36,7 +36,7 @@ demo sign-in; the first request after it has been idle takes ~30 s while the JVM
 | Migrations | Flyway |
 | AI judge (decision assist) | `nvidia/nemotron-3.5-bolt-e4b` on **NVIDIA NIM** (free, same key as the embeddings): strict JSON schema, ~1–2 s. Swappable `DecisionProvider`; the **Parallel Decisions** decision model (per-outcome probabilities, paid $0.001) is one setting away |
 | AI (extraction/explanation) | the same Nemotron 3.5 Bolt model (OpenAI-compatible chat), explanations in ~2 s |
-| Embeddings | Pluggable `EmbeddingProvider`: NVIDIA NIM `nemotron-3.5-embed-1b` (OpenAI-compatible, asymmetric query/passage, shortened to 384-d), or a local deterministic fallback for dev/CI |
+| Embeddings | Pluggable `EmbeddingProvider`: NVIDIA NIM `nemotron-3.5-embed-8b` (OpenAI-compatible, asymmetric query/passage, shortened to 384-d), or a local deterministic fallback for dev/CI |
 | Docs | OpenAPI / Swagger UI (springdoc) |
 | Build | Maven (via committed `./mvnw` wrapper) |
 | Container | Docker (multi-stage, non-root, Java 21 JRE) |
@@ -49,7 +49,7 @@ Research of the live Inception/OpenRouter docs established two facts that shape 
    That paid off: the judge has changed twice, by configuration only: Inception's Mercury 2.5 (LLM, retired by OpenRouter in November 2026), then the Parallel Decisions decision model (its free tier was withdrawn days later), then Nemotron 3.5 Bolt on NVIDIA NIM. None of these needed a change to business logic.
 2. **OpenRouter exposes no first-party embeddings endpoint**, so
    embeddings come from a separate, swappable `EmbeddingProvider` — NVIDIA NIM
-   (`nvidia/nemotron-3.5-embed-1b`) in the configured setup.
+   (`nvidia/nemotron-3.5-embed-8b`) in the configured setup.
 
 All external AI access sits behind interfaces (`ChatLlmProvider`, `DecisionProvider`,
 `EmbeddingProvider`) so providers can change without touching business logic.
@@ -84,6 +84,7 @@ This project is built incrementally. Each phase compiles and tests before the ne
 - [x] **Phase 21** — Live on AWS: Lambda (container + Web Adapter, streaming Function URL), CloudFront + S3, Neon Postgres, GitHub Actions deploy via OIDC
 - [x] **Phase 22** — Explanations that explain: rule reasons kept, whole-chunk evidence, quoted policy wording, honest "who wrote it", 40 s deadline
 - [x] **Phase 23** — Free AI judge after the decision model's free tier was withdrawn: Nemotron 3.5 Bolt on NVIDIA NIM (~2 s judge and explanations)
+- [x] **Phase 24** — Retrieval survives a busy free model: saved query vectors (pgvector), keyword fallback, 6 s embedding timeout; switched to `nemotron-3.5-embed-8b` when the 1b endpoint was overloaded
 
 ---
 

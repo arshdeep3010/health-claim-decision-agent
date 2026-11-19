@@ -63,7 +63,7 @@ a human-readable **explanation** of a finished decision, but can never change it
 | RAG | pgvector cosine `<=>`, HNSW index | semantic retrieval with traceability |
 | AI judge | `nvidia/nemotron-3.5-bolt-e4b` on **NVIDIA NIM** (free) | strict JSON schema, ~1–2 s; a decision model (Parallel, paid) by config |
 | Chat AI (extraction, explanation) | the same Nemotron 3.5 Bolt model | OpenAI-compatible chat; explanations in ~2 s |
-| Embeddings | **NVIDIA NIM** `nvidia/nemotron-3.5-embed-1b` (OpenAI-compatible), **or** local deterministic | semantic retrieval; offline dev/CI |
+| Embeddings | **NVIDIA NIM** `nvidia/nemotron-3.5-embed-8b` (OpenAI-compatible), **or** local deterministic | semantic retrieval; offline dev/CI |
 | Streaming | Spring MVC `SseEmitter` + dedicated executor | live per-stage progress |
 | Resilience | Resilience4j (chat); bounded retry (embeddings) | timeout + retry + circuit breaker |
 | PDF | Apache PDFBox | policy-document text extraction |
@@ -488,7 +488,7 @@ MERCURY_PROVIDER=nvidia                MERCURY_MODEL=nvidia/nemotron-3.5-bolt-e4
 MERCURY_BASE_URL=https://integrate.api.nvidia.com/v1   MERCURY_API_KEY=${EMBEDDING_API_KEY}
 DECISION_ENGINE=llm                    # or decision-model (+ DECISION_MODEL_API_KEY)
 EMBEDDING_PROVIDER=openai-compatible   EMBEDDING_BASE_URL=https://integrate.api.nvidia.com/v1
-EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-1b   EMBEDDING_DIM=384
+EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-8b   EMBEDDING_DIM=384
 EMBEDDING_QUERY_INPUT_TYPE=query       EMBEDDING_PASSAGE_INPUT_TYPE=passage
 EMBEDDING_REQUEST_DIMENSIONS=true      EMBEDDING_TRUNCATE=END   EMBEDDING_BATCH_SIZE=1
 ```
