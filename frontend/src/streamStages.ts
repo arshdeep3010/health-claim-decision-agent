@@ -43,6 +43,9 @@ export function finalStatus(e: StageEvent): StageStatus {
       AUTH: 'Not authorized', LOAD: 'Claim could not be loaded', RETRIEVE: 'Retrieval failed',
       RULES: 'Rules failed', AI: 'AI provider error', GUARDRAILS: 'Guardrails failed', PERSIST: 'Could not save',
     }
+    if (e.stage === 'RETRIEVE' && d.cause === 'EMBEDDING_UNAVAILABLE') {
+      return { state: 'failed', result: 'Free embedding model is busy', detail: ['try again in a minute', 'safely routed to human review', t] }
+    }
     return { state: 'failed', result: what[e.stage], detail: e.stage === 'AI' || e.stage === 'RETRIEVE' ? ['safely routed to human review', t] : [t] }
   }
   if (e.status === 'SKIPPED') {
@@ -64,8 +67,8 @@ export function finalStatus(e: StageEvent): StageStatus {
       const n = Number(d.clauses ?? 0)
       return n > 0
         ? d.method === 'keyword'
-          ? { state: 'done', tone: 'pass', result: `${n} policy clauses retrieved`, detail: ['keyword match (embedding API busy)', `top score ${Number(d.topSimilarity ?? 0).toFixed(2)}`, `top-k ${str(d.topK)}`, t] }
-          : { state: 'done', tone: 'pass', result: `${n} policy clauses retrieved`, detail: [`top similarity ${Number(d.topSimilarity ?? 0).toFixed(2)}`, `top-k ${str(d.topK)}`, t, str(d.embeddingModel), d.method === 'cached_vector' ? 'cached query vector' : ''].filter(Boolean) }
+          ? { state: 'done', tone: 'warn', result: `${n} clauses found by keyword search`, detail: ['free embedding model busy, so Postgres full-text search was used', `top score ${Number(d.topSimilarity ?? 0).toFixed(2)}`, t] }
+          : { state: 'done', tone: 'pass', result: `${n} policy clauses retrieved`, detail: [d.method === 'cached_vector' ? 'saved query vector reused, no model call' : '', `top similarity ${Number(d.topSimilarity ?? 0).toFixed(2)}`, `top-k ${str(d.topK)}`, t, str(d.embeddingModel)].filter(Boolean) }
         : { state: 'done', tone: 'warn', result: 'No matching clauses', detail: ['no policy wording indexed for this policy', t] }
     }
     case 'RULES': {

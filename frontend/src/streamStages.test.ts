@@ -23,13 +23,19 @@ describe('finalStatus', () => {
 
   it('says when a cached query vector was reused', () => {
     const s = finalStatus(ev('RETRIEVE', 'COMPLETED', { clauses: 3, topK: 5, topSimilarity: 0.3, embeddingModel: 'm', method: 'cached_vector' }))
-    expect(s.detail).toEqual(['top similarity 0.30', 'top-k 5', '12 ms', 'm', 'cached query vector'])
+    expect(s.detail).toEqual(['saved query vector reused, no model call', 'top similarity 0.30', 'top-k 5', '12 ms', 'm'])
   })
 
   it('says when retrieval fell back to keyword search', () => {
     const s = finalStatus(ev('RETRIEVE', 'COMPLETED', { clauses: 2, topK: 5, topSimilarity: 0.41, embeddingModel: 'm', method: 'keyword' }))
-    expect(s).toMatchObject({ state: 'done', tone: 'pass', result: '2 policy clauses retrieved' })
-    expect(s.detail).toEqual(['keyword match (embedding API busy)', 'top score 0.41', 'top-k 5', '12 ms'])
+    expect(s).toMatchObject({ state: 'done', tone: 'warn', result: '2 clauses found by keyword search' })
+    expect(s.detail).toEqual(['free embedding model busy, so Postgres full-text search was used', 'top score 0.41', '12 ms'])
+  })
+
+  it('says plainly when the free embedding model is busy', () => {
+    const s = finalStatus(ev('RETRIEVE', 'FAILED', { reason: 'RAG_FAILURE', cause: 'EMBEDDING_UNAVAILABLE' }))
+    expect(s).toMatchObject({ state: 'failed', result: 'Free embedding model is busy' })
+    expect(s.detail).toEqual(['try again in a minute', 'safely routed to human review', '12 ms'])
   })
 
   it('warns when no policy wording matched', () => {

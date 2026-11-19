@@ -125,6 +125,7 @@ public class DecisionOrchestrator {
             long ragStart = System.nanoTime();
             boolean ok = false;
             RetrievalService.Method method = null;
+            String ragCause = null;
             try {
                 RetrievalService.Retrieval retrieval = retrievalService.search(data.policyId(), query, properties.evidenceTopK());
                 evidence = retrieval.evidence();
@@ -132,12 +133,15 @@ public class DecisionOrchestrator {
                 ok = true;
             } catch (Exception e) {
                 ragFailed = true;
+                ragCause = e instanceof com.healthclaim.rag.embedding.EmbeddingException
+                        ? "EMBEDDING_UNAVAILABLE" : "RETRIEVAL_ERROR";
                 log.warn("RAG retrieval failed for claim {}: {}", claimId, e.getMessage());
             } finally {
                 metrics.recordRagLatency(millisSince(ragStart), ok);
             }
             emit(listener, ragFailed
-                    ? StageEvent.failed(AnalysisStage.RETRIEVE, millisSince(ragStart), details("reason", "RAG_FAILURE"))
+                    ? StageEvent.failed(AnalysisStage.RETRIEVE, millisSince(ragStart),
+                            details("reason", "RAG_FAILURE", "cause", ragCause))
                     : StageEvent.completed(AnalysisStage.RETRIEVE, millisSince(ragStart), details(
                             "clauses", evidence.size(),
                             "topK", properties.evidenceTopK(),
