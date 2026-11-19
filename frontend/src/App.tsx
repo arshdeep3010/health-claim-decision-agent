@@ -99,6 +99,16 @@ export default function App() {
           </div>
         </div>
       </nav>
+      <div className="site-notice" role="status">
+        <div className="container site-notice-inner">
+          <b>Notice:</b>
+          <span>
+            The free NVIDIA AI model is sometimes busy. When it is, the app reuses saved pgvector search vectors or
+            falls back to keyword search, and a claim the AI can’t judge goes to human review. We’re fixing this by
+            adding an AWS Bedrock fallback.
+          </span>
+        </div>
+      </div>
       {/* Swap pages immediately (no exit wait) and fade the new one in. */}
       <motion.div key={route.name === 'claim' ? route.id : route.name}
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>

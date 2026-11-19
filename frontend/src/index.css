@@ -293,6 +293,9 @@ textarea.input {
 }
 textarea.input:focus { outline: none; box-shadow: 0 0 0 4px var(--accent-soft), inset 0 0 0 1px var(--accent); }
 
+.site-notice { background: var(--warn-soft); border-bottom: 1px solid var(--hairline); color: var(--text); }
+.site-notice-inner { display: flex; gap: 8px; align-items: baseline; padding-block: 10px; font-size: 13.5px; line-height: 1.45; }
+.site-notice-inner b { color: var(--warn); font-weight: 650; white-space: nowrap; }
 .notice { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; font-size: 14.5px; }
 .notice.stop { background: var(--stop-soft); color: var(--stop); }
 .notice.info { background: var(--accent-soft); color: var(--text); }
