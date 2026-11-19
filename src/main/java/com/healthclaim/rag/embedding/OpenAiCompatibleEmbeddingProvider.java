@@ -3,9 +3,8 @@ package com.healthclaim.rag.embedding;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.healthclaim.config.EmbeddingProperties;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -23,12 +22,21 @@ import java.util.List;
  * receive the right {@code input_type}; for symmetric models leave the input types
  * blank and both paths send the plain OpenAI request.
  */
-@Component
-@ConditionalOnProperty(prefix = "app.embedding", name = "provider", havingValue = "openai-compatible")
 public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
 
     /** Attempts per request: one call plus two retries on a 5xx or network error. */
     static final int MAX_ATTEMPTS = 3;
+    /** A hosted endpoint that hangs must not hold an analysis until Lambda kills it. */
+    static final int CONNECT_TIMEOUT_MS = 5_000;
+    static final int READ_TIMEOUT_MS = 6_000;
+
+    /** A copy of {@code builder} with connect/read timeouts (applied in {@link EmbeddingClientConfig}). */
+    public static RestClient.Builder withTimeouts(RestClient.Builder builder) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        factory.setReadTimeout(READ_TIMEOUT_MS);
+        return builder.clone().requestFactory(factory);
+    }
 
     private final EmbeddingProperties properties;
     private final RestClient client;

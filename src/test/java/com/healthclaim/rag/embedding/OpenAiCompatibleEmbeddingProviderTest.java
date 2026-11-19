@@ -46,6 +46,39 @@ class OpenAiCompatibleEmbeddingProviderTest {
     }
 
     @Test
+    void hangingEndpointTimesOutInsteadOfBlockingTheAnalysis() throws Exception {
+        com.sun.net.httpserver.HttpServer hanging = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        hanging.createContext("/v1/embeddings", exchange -> {
+            try {
+                Thread.sleep(60_000);       // never answers in time, like an overloaded host
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        hanging.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        hanging.start();
+        try {
+            String url = "http://127.0.0.1:" + hanging.getAddress().getPort() + "/v1";
+            EmbeddingProperties props = new EmbeddingProperties("openai-compatible", "m", url, "k", 4,
+                    "query", "passage", true, "END", 1);
+            OpenAiCompatibleEmbeddingProvider provider = new OpenAiCompatibleEmbeddingProvider(
+                    props, OpenAiCompatibleEmbeddingProvider.withTimeouts(RestClient.builder()));
+            provider.setBackOffMillis(1);
+
+            long start = System.nanoTime();
+            assertThatThrownBy(() -> provider.embedQuery("gallstones"))
+                    .isInstanceOf(EmbeddingException.class);
+            long seconds = (System.nanoTime() - start) / 1_000_000_000L;
+            assertThat(seconds).isLessThan(OpenAiCompatibleEmbeddingProvider.MAX_ATTEMPTS
+                    * (OpenAiCompatibleEmbeddingProvider.READ_TIMEOUT_MS / 1000 + 2L));
+        } finally {
+            hanging.stop(0);
+        }
+    }
+
+    @Test
     void queryCarriesQueryInputTypeDimensionsAndTruncate() {
         OpenAiCompatibleEmbeddingProvider provider = provider(nvidiaStyle(32));
         server.expect(requestTo(URL + "/embeddings"))
